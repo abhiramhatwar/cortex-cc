@@ -47,6 +47,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/queues", s.handleGetQueues)
 	s.mux.HandleFunc("GET /api/calls/{id}/transcript", s.handleGetTranscript)
 	s.mux.HandleFunc("GET /api/calls/{id}/summary", s.handleGetSummary)
+	s.mux.HandleFunc("POST /api/calls/{id}/flag", s.handleFlagCall)
+	s.mux.HandleFunc("POST /api/calls/{id}/route", s.handleRouteCall)
 	s.mux.Handle("/", http.FileServer(http.Dir("./web")))
 }
 
@@ -193,6 +195,48 @@ func (s *Server) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		"elapsed":   result.Elapsed,
 		"call_id":   callID,
 		"stored":    stored,
+	})
+}
+
+func (s *Server) handleFlagCall(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if !s.engine.FlagCall(id, req.Reason) {
+		writeError(w, http.StatusNotFound, "call not found: "+id)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("call %s flagged: %s", id, req.Reason),
+	})
+}
+
+func (s *Server) handleRouteCall(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if req.AgentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+	if !s.engine.RouteCall(id, req.AgentID) {
+		writeError(w, http.StatusBadRequest, "could not route call — agent may be unavailable or call not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("call %s routed to agent %s", id, req.AgentID),
 	})
 }
 

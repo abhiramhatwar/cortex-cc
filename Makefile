@@ -1,16 +1,26 @@
 BINARY   := cortex-cc
+MCP      := cortex-mcp
 CMD      := ./cmd/server
+MCP_CMD  := ./cmd/mcp-server
 GOFLAGS  := -ldflags="-s -w"
 
-.PHONY: run build test lint docker-up docker-down clean
+.PHONY: run build build-mcp build-all test lint docker-up docker-down clean
 
 ## run: start the server (requires Ollama running locally)
 run:
 	go run $(CMD)
 
-## build: compile a production binary
+## build: compile the main server binary
 build:
 	go build $(GOFLAGS) -o bin/$(BINARY) $(CMD)
+
+## build-mcp: compile the standalone MCP stdio server
+##   Add to Cursor: {"mcpServers":{"cortex-cc":{"command":"$(PWD)/bin/cortex-mcp"}}}
+build-mcp:
+	go build $(GOFLAGS) -o bin/$(MCP) $(MCP_CMD)
+
+## build-all: compile both binaries
+build-all: build build-mcp
 
 ## test: run all unit tests with race detector
 test:

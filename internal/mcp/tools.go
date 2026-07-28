@@ -37,7 +37,11 @@ type ToolFunction struct {
 }
 
 // Definitions returns all tool definitions for Ollama.
-func (r *ToolRegistry) Definitions() []ToolDef {
+func (r *ToolRegistry) Definitions() []ToolDef { return allDefinitions() }
+
+// allDefinitions is the single source of truth for all tool metadata.
+// Both ToolRegistry and HTTPExecutor call this.
+func allDefinitions() []ToolDef {
 	return []ToolDef{
 		{
 			Type: "function",
