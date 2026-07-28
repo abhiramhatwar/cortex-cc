@@ -18,14 +18,14 @@ func newTestRegistry(t *testing.T) *ToolRegistry {
 	t.Cleanup(func() { st.Close() })
 	eng := engine.New(st, nil)
 	eng.Start(t.Context())
-	return NewToolRegistry(eng, st)
+	return NewToolRegistry(eng, st, nil)
 }
 
 func TestDefinitionsCount(t *testing.T) {
 	r := newTestRegistry(t)
 	defs := r.Definitions()
-	if len(defs) != 8 {
-		t.Errorf("expected 8 tool definitions, got %d", len(defs))
+	if len(defs) != 9 {
+		t.Errorf("expected 9 tool definitions, got %d", len(defs))
 	}
 }
 
@@ -38,8 +38,9 @@ func TestDefinitionNames(t *testing.T) {
 		"get_sentiment_report": true,
 		"route_call":          true,
 		"flag_call":           true,
-		"summarize_call":      true,
-		"find_best_agent":     true,
+		"summarize_call":        true,
+		"find_best_agent":       true,
+		"search_knowledge_base": true,
 	}
 	for _, d := range r.Definitions() {
 		name := d.Function.Name

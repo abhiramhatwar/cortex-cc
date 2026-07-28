@@ -10,6 +10,7 @@ import (
 	"cortex-cc/internal/assist"
 	"cortex-cc/internal/config"
 	"cortex-cc/internal/engine"
+	"cortex-cc/internal/kb"
 	"cortex-cc/internal/llm"
 	"cortex-cc/internal/mcp"
 	"cortex-cc/internal/monitor"
@@ -29,6 +30,9 @@ func main() {
 		log.Fatalf("store: %v", err)
 	}
 	defer st.Close()
+
+	kb.SeedIfEmpty(st)
+	retriever := kb.NewRetriever(st)
 
 	// on-prem HuggingFace sentiment service (optional — degrades gracefully)
 	sc := sentiment.New(cfg.SentimentURL)
@@ -52,7 +56,7 @@ func main() {
 	if err := llmClient.Ping(); err != nil {
 		log.Printf("warning: ollama not reachable (%v) — AI copilot will be unavailable", err)
 	}
-	registry := mcp.NewToolRegistry(eng, st)
+	registry := mcp.NewToolRegistry(eng, st, retriever)
 	loop := llm.NewLoop(llmClient, registry)
 
 	// agent assist: generates real-time response suggestions for agents on customer lines
@@ -74,6 +78,6 @@ func main() {
 		tr = nil
 	}
 
-	srv := server.New(cfg, st, eng, hub, loop, tr)
+	srv := server.New(cfg, st, eng, hub, loop, tr, retriever)
 	log.Fatal(srv.Start())
 }

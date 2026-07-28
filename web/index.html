@@ -132,6 +132,29 @@
     </div>
   </div>
 
+  <!-- Knowledge Base Search -->
+  <div class="mt-4 card p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <div class="w-5 h-5 rounded bg-amber-600 flex items-center justify-center text-xs">KB</div>
+        <h2 class="text-sm font-semibold text-white">Knowledge Base</h2>
+        <span class="text-xs text-slate-500">— BM25 retrieval · on-prem</span>
+      </div>
+    </div>
+    <div class="flex gap-2 mb-3">
+      <input id="kb-input" type="text"
+        placeholder='Search: "refund policy", "escalation procedure", "SLA breach"'
+        class="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500" />
+      <button onclick="searchKB()"
+        class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+        Search
+      </button>
+    </div>
+    <div id="kb-results" class="space-y-2 max-h-52 overflow-y-auto">
+      <p class="text-xs text-slate-600 italic">Search KB articles used by the AI copilot and MCP tools...</p>
+    </div>
+  </div>
+
   <!-- AI Copilot Chat -->
   <div class="mt-4 card p-4" style="height:340px; display:flex; flex-direction:column;">
     <div class="flex items-center gap-2 mb-3">
@@ -382,6 +405,41 @@
 
   document.getElementById('chat-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') sendChat();
+  });
+
+  // ── KB Search ─────────────────────────────────────────────────────────────
+  async function searchKB() {
+    const input = document.getElementById('kb-input');
+    const q = input.value.trim();
+    if (!q) return;
+    const box = document.getElementById('kb-results');
+    box.innerHTML = '<p class="text-xs text-slate-500 italic">Searching...</p>';
+    try {
+      const res = await fetch(`/api/kb/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (!data.results || data.results.length === 0) {
+        box.innerHTML = '<p class="text-xs text-slate-500 italic">No results found.</p>';
+        return;
+      }
+      box.innerHTML = data.results.map(a => `
+        <div class="p-3 rounded-lg bg-slate-800/60 border border-slate-700">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-xs font-semibold text-amber-400">${escHTML(a.title)}</span>
+            ${(a.tags || []).map(t => `<span class="text-xs bg-slate-700 text-slate-300 px-1.5 rounded">${escHTML(t)}</span>`).join('')}
+          </div>
+          <p class="text-xs text-slate-400 line-clamp-3">${escHTML(a.content.slice(0, 200))}…</p>
+        </div>`).join('');
+    } catch {
+      box.innerHTML = '<p class="text-xs text-red-400 italic">Search failed.</p>';
+    }
+  }
+
+  function escHTML(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  document.getElementById('kb-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') searchKB();
   });
 
   connect();

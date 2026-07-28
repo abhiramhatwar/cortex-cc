@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
 	"cortex-cc/internal/models"
@@ -81,6 +82,14 @@ func (s *Store) migrate() error {
 		notes            TEXT,
 		scored_at        DATETIME NOT NULL,
 		FOREIGN KEY (call_id) REFERENCES calls(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS kb_articles (
+		id         TEXT PRIMARY KEY,
+		title      TEXT NOT NULL,
+		content    TEXT NOT NULL,
+		tags       TEXT NOT NULL DEFAULT '[]',
+		created_at DATETIME NOT NULL
 	);
 	`)
 	return err
@@ -354,4 +363,96 @@ func join(ss []string, sep string) string {
 		result += s
 	}
 	return result
+}
+
+// ── Knowledge Base ────────────────────────────────────────────────────────────
+
+func (s *Store) InsertKBArticle(a *models.KBArticle) error {
+	tagsJSON := encodeJSON(a.Tags)
+	_, err := s.db.Exec(`
+		INSERT OR REPLACE INTO kb_articles (id, title, content, tags, created_at)
+		VALUES (?,?,?,?,?)`,
+		a.ID, a.Title, a.Content, tagsJSON, a.CreatedAt,
+	)
+	return err
+}
+
+func (s *Store) GetKBArticle(id string) (*models.KBArticle, error) {
+	row := s.db.QueryRow(`SELECT id, title, content, tags, created_at FROM kb_articles WHERE id=?`, id)
+	return scanKBArticle(row)
+}
+
+func (s *Store) ListKBArticles() ([]*models.KBArticle, error) {
+	rows, err := s.db.Query(`SELECT id, title, content, tags, created_at FROM kb_articles ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.KBArticle
+	for rows.Next() {
+		a, err := scanKBArticle(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteKBArticle(id string) error {
+	_, err := s.db.Exec(`DELETE FROM kb_articles WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) KBCount() (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM kb_articles`).Scan(&n)
+	return n, err
+}
+
+type kbScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanKBArticle(row kbScanner) (*models.KBArticle, error) {
+	a := &models.KBArticle{}
+	var tagsJSON string
+	if err := row.Scan(&a.ID, &a.Title, &a.Content, &tagsJSON, &a.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	a.Tags = decodeJSON(tagsJSON)
+	return a, nil
+}
+
+func encodeJSON(ss []string) string {
+	if len(ss) == 0 {
+		return "[]"
+	}
+	b := `[`
+	for i, s := range ss {
+		if i > 0 {
+			b += ","
+		}
+		b += `"` + s + `"`
+	}
+	return b + `]`
+}
+
+func decodeJSON(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "[]" {
+		return nil
+	}
+	s = strings.Trim(s, "[]")
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(strings.Trim(part, `"`))
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

@@ -69,7 +69,7 @@ Every single one of them receives a "no" when they ask Mitel for on-prem AI. Tha
 | AI engine | Talkative AI (cloud) | Proprietary cloud | Ollama + Llama 3.1 (local) |
 | Data leaves server | Yes | Yes | **Never** |
 | HIPAA / PCI compliant | No | No | **Yes** |
-| MCP support | None | None | **Full — 7 tools, stdio binary** |
+| MCP support | None | None | **Full — 9 tools, stdio binary** |
 | Swap the LLM | No | No | **Yes — any Ollama model** |
 | Real-time sentiment | No | Yes (cloud) | **Yes (on-prem DistilBERT)** |
 | Agent assist suggestions | No | Yes (cloud) | **Yes (on-prem Llama 3.1)** |
@@ -150,7 +150,7 @@ cortex-cc is an **MCP server** built in Go. It wraps a contact center's live dat
 │               │                                     │                  │
 │  ┌────────────▼──────────┐           ┌──────────────┴──────────────┐  │
 │  │   MCP Tool Registry   │           │       Call Engine            │  │
-│  │  7 tools, shared by   │           │  goroutine state machine     │  │
+│  │  9 tools, shared by   │           │  goroutine state machine     │  │
 │  │  Ollama + MCP server  │           │  tick=2s, gen=8s, tx=6s     │  │
 │  └────────────┬──────────┘           └──────────────┬──────────────┘  │
 │               │                                     │                  │
@@ -315,7 +315,7 @@ Both consumers call the exact same `Execute()` method. The tool registry doesn't
   User: "Flag the most distressed caller for QA."
 
   Round 1:
-    → Ollama sees: user message + 7 tool definitions
+    → Ollama sees: user message + 9 tool definitions
     → Ollama responds with: tool_call{ get_sentiment_report() }
     → cortex-cc executes tool, appends result to history
 
@@ -575,7 +575,7 @@ Every time a call completes, cortex-cc automatically scores the agent's performa
 
 ### 9. Standalone MCP Stdio Server
 
-`bin/cortex-mcp` is a separate binary that exposes all 7 contact center tools over the Model Context Protocol stdio transport. Unlike the in-process MCP server (which shares the engine's memory), this binary runs as an independent process and communicates with a running cortex-cc instance via HTTP.
+`bin/cortex-mcp` is a separate binary that exposes all 9 contact center tools over the Model Context Protocol stdio transport. Unlike the in-process MCP server (which shares the engine's memory), this binary runs as an independent process and communicates with a running cortex-cc instance via HTTP.
 
 ```
   MCP Client (Cursor IDE, VS Code Copilot, etc.)
@@ -717,7 +717,47 @@ Response 200:
 
 ---
 
-### 12. Proactive Monitor
+### 12. RAG Knowledge Base
+
+The knowledge base gives the AI copilot and MCP tools access to factual contact-center policies and procedures — without hallucinating. It uses pure-Go BM25-lite retrieval over SQLite, requiring zero extra services beyond what already runs.
+
+```
+Supervisor: "What's the refund policy for amounts over $100?"
+       │
+       ▼
+LLM calls search_knowledge_base(query="refund policy over $100")
+       │
+       ▼
+BM25-lite scorer
+  • tokenize query → stop-word filtered term map
+  • for each KB article: score = Σ BM25(term, title×2 + content)
+  • title weighted 2× — concept-named articles score higher
+  • return top-3 results
+       │
+       ▼
+LLM synthesises answer from article content
+→ "Manager authorization required for refunds $100–$500, Director for >$500."
+```
+
+**Startup seeding** — 10 pre-loaded articles covering billing disputes, refunds, escalation matrix, SLA definitions, premium support FAQ, Tier 1 troubleshooting, call recording/privacy, CSAT follow-up, account cancellation, and after-hours support. `SeedIfEmpty` is idempotent: no-op if the table already has articles.
+
+**REST API:**
+
+```
+GET    /api/kb              → list all articles
+POST   /api/kb              → create article  {title, content, tags[]}
+GET    /api/kb/search?q=    → BM25 search, top 5 results
+GET    /api/kb/{id}         → get single article
+DELETE /api/kb/{id}         → delete article
+```
+
+**MCP tool `search_knowledge_base`** — the LLM automatically invokes this tool when the supervisor asks about policies, procedures, SLA definitions, or any operational question. Results are injected into the LLM context as structured article content, not free-form prose.
+
+**Dashboard widget** — an amber-accented search bar above the AI chat lets supervisors query the KB directly. Results show title, tags, and a 200-character preview inline.
+
+---
+
+### 13. Proactive Monitor
 
 The monitor runs independently of any user query. Every 60 seconds it calls the tool registry directly, computes anomalies, and fires alerts automatically.
 
@@ -768,7 +808,7 @@ The monitor runs independently of any user query. Every 60 seconds it calls the 
 
 | Feature | What It Does | Key Detail |
 |---|---|---|
-| **MCP Stdio Server** | Standalone binary exposing 7 tools over stdio | Any MCP client: Cursor, VS Code, etc. |
+| **MCP Stdio Server** | Standalone binary exposing 9 tools over stdio | Any MCP client: Cursor, VS Code, etc. |
 | **MCP Tool Registry** | In-process tool calling by Ollama loop | Shared `Execute()` — no duplication |
 | **AI Copilot Chat** | Natural language Q&A over live data | Agentic, up to 5 tool rounds |
 | **Multi-Turn History** | Conversation context persists across questions | Reset via `POST /api/chat/reset` |
@@ -1026,6 +1066,14 @@ Response 200 (no available agents):
 Response 400: { "error": "queue parameter required: Sales, Billing, or Support" }
 ```
 
+```
+GET    /api/kb              → list all KB articles
+POST   /api/kb              → create KB article  {title, content, tags[]}
+GET    /api/kb/search?q=    → BM25 keyword search, returns top-5 results
+GET    /api/kb/{id}         → fetch single article by ID
+DELETE /api/kb/{id}         → remove article
+```
+
 ### Agents
 
 ```
@@ -1176,7 +1224,7 @@ ws.onmessage = ({ data }) => {
 
 ## MCP Tools Reference
 
-The 7 tools are registered with the MCP server (for external MCP clients) and with the Ollama chat loop (for LLM tool-calling). Both consumers use the same `ToolRegistry.Execute()` method.
+The 9 tools are registered with the MCP server (for external MCP clients) and with the Ollama chat loop (for LLM tool-calling). Both consumers use the same `ToolRegistry.Execute()` method.
 
 ### Tool: `get_queue_status`
 
@@ -1350,6 +1398,66 @@ The LLM then generates the actual summary from this payload. The result can be s
 
 ---
 
+### Tool: `find_best_agent`
+
+Returns the highest-scoring available agent for a queue using the three-tier skill scoring algorithm.
+
+```
+Parameters:
+  queue (string, required) — "Sales", "Billing", or "Support"
+
+Response JSON:
+{
+  "queue": "Billing",
+  "reason": "primary skill: Billing specialist (3 calls today)",
+  "agent": {
+    "id": "uuid-...",
+    "name": "Priya Sharma",
+    "status": "available",
+    "skills": ["Billing", "Support"],
+    "calls_handled_today": 3,
+    "avg_handle_time_seconds": 212.5
+  }
+}
+
+Response (no agents available):
+{ "queue": "Billing", "agent": null, "reason": "no available agents for Billing" }
+```
+
+This tool exposes routing intelligence as a read-only query — the LLM can answer "who should take the next Billing call?" without actually assigning anyone.
+
+---
+
+### Tool: `search_knowledge_base`
+
+Searches the on-prem KB using BM25-lite retrieval and returns the top-3 most relevant articles.
+
+```
+Parameters:
+  query (string, required) — natural language or keyword query
+
+Response JSON:
+{
+  "results": [
+    {
+      "id": "uuid-...",
+      "title": "Refund Processing Procedure",
+      "content": "Refund eligibility and processing:\n- Refunds are available within 30 days...",
+      "tags": ["refund", "billing", "processing"]
+    },
+    ...
+  ],
+  "count": 3
+}
+
+Response (no matches):
+{ "results": [], "message": "no matching knowledge base articles found for: ..." }
+```
+
+Title is weighted 2× in BM25 scoring so concept-named articles (e.g. "Refund Processing Procedure") rank highest for topically-related queries.
+
+---
+
 ## Tech Stack
 
 ### Why These Exact Tools
@@ -1449,7 +1557,7 @@ cortex-cc/
 │   │
 │   ├── mcp/
 │   │   ├── tools.go             ToolRegistry with Definitions() + Execute().
-│   │   │                        7 tools. Shared by Ollama loop + MCP server.
+│   │   │                        9 tools. Shared by Ollama loop + MCP server.
 │   │   ├── server.go            MCP stdio server (mark3labs/mcp-go).
 │   │   └── tools_test.go        12 unit tests: counts, names, JSON schemas,
 │   │                            Execute dispatch, error paths.
@@ -1768,7 +1876,7 @@ make help             # list all targets
 |---|---|
 | 1–3 | Project scaffold, domain models, SQLite store, Docker setup |
 | 4–6 | Call engine goroutines, WebSocket hub, REST API |
-| 7–9 | MCP server (7 tools), Ollama client, agentic tool-calling loop |
+| 7–9 | MCP server (9 tools), Ollama client, agentic tool-calling loop |
 | 10–12 | `/api/chat` endpoint, supervisor dashboard, proactive monitor |
 | 13–15 | Whisper STT microservice, Go transcriber client, `/api/transcribe` |
 | 16–17 | HuggingFace DistilBERT sentiment service, Go client, engine wiring |

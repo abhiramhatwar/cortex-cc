@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cortex-cc/internal/engine"
+	"cortex-cc/internal/kb"
 	"cortex-cc/internal/models"
 	"cortex-cc/internal/store"
 )
@@ -16,12 +17,13 @@ import (
 // It is used both by the MCP server (for external MCP clients)
 // and by the Ollama loop (for LLM tool calling).
 type ToolRegistry struct {
-	engine *engine.Engine
-	store  *store.Store
+	engine    *engine.Engine
+	store     *store.Store
+	retriever *kb.Retriever
 }
 
-func NewToolRegistry(eng *engine.Engine, st *store.Store) *ToolRegistry {
-	return &ToolRegistry{engine: eng, store: st}
+func NewToolRegistry(eng *engine.Engine, st *store.Store, retriever *kb.Retriever) *ToolRegistry {
+	return &ToolRegistry{engine: eng, store: st, retriever: retriever}
 }
 
 // ToolDef is what we send to Ollama as a function definition.
@@ -128,6 +130,20 @@ func allDefinitions() []ToolDef {
 		{
 			Type: "function",
 			Function: ToolFunction{
+				Name:        "search_knowledge_base",
+				Description: "Searches the contact center knowledge base for policies, procedures, and FAQs. Use this when the supervisor asks about a policy, refund procedure, SLA definition, escalation path, or any factual question about how the contact center operates.",
+				Parameters: json.RawMessage(`{
+					"type":"object",
+					"properties":{
+						"query":{"type":"string","description":"Search query, e.g. 'refund policy', 'escalation procedure', 'SLA breach credit'"}
+					},
+					"required":["query"]
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: ToolFunction{
 				Name:        "find_best_agent",
 				Description: "Returns the best available agent for a given queue using skills-based scoring: primary skill match > secondary skill > fallback, then tiebroken by fewest calls handled today. Also returns a human-readable routing reason.",
 				Parameters: json.RawMessage(`{
@@ -165,6 +181,9 @@ func (r *ToolRegistry) Execute(name string, args map[string]any) (string, error)
 	case "summarize_call":
 		id, _ := args["call_id"].(string)
 		return r.summarizeCall(id)
+	case "search_knowledge_base":
+		query, _ := args["query"].(string)
+		return r.searchKB(query)
 	case "find_best_agent":
 		queue, _ := args["queue"].(string)
 		return r.findBestAgent(queue)
@@ -363,6 +382,32 @@ func (r *ToolRegistry) summarizeCall(callID string) (string, error) {
 		"transcript": sb.String(),
 		"instruction": "Generate a JSON summary with fields: issue, resolution, follow_up, sentiment_label (positive/neutral/negative)",
 	})
+}
+
+func (r *ToolRegistry) searchKB(query string) (string, error) {
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	results, err := r.retriever.Search(query, 3)
+	if err != nil {
+		return "", fmt.Errorf("kb search error: %w", err)
+	}
+	if len(results) == 0 {
+		return marshal(map[string]any{
+			"results": []any{},
+			"message": "no matching knowledge base articles found for: " + query,
+		})
+	}
+	articles := make([]map[string]any, len(results))
+	for i, a := range results {
+		articles[i] = map[string]any{
+			"id":      a.ID,
+			"title":   a.Title,
+			"content": a.Content,
+			"tags":    a.Tags,
+		}
+	}
+	return marshal(map[string]any{"results": articles, "count": len(articles)})
 }
 
 func (r *ToolRegistry) findBestAgent(queue string) (string, error) {

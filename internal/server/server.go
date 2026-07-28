@@ -15,6 +15,7 @@ import (
 
 	"cortex-cc/internal/config"
 	"cortex-cc/internal/engine"
+	"cortex-cc/internal/kb"
 	"cortex-cc/internal/llm"
 	"cortex-cc/internal/metrics"
 	"cortex-cc/internal/models"
@@ -30,11 +31,12 @@ type Server struct {
 	hub         *ws.Hub
 	loop        *llm.Loop
 	transcriber *transcriber.Client
+	retriever   *kb.Retriever
 	mux         *http.ServeMux
 }
 
-func New(cfg *config.Config, st *store.Store, eng *engine.Engine, hub *ws.Hub, loop *llm.Loop, tr *transcriber.Client) *Server {
-	s := &Server{cfg: cfg, store: st, engine: eng, hub: hub, loop: loop, transcriber: tr, mux: http.NewServeMux()}
+func New(cfg *config.Config, st *store.Store, eng *engine.Engine, hub *ws.Hub, loop *llm.Loop, tr *transcriber.Client, retriever *kb.Retriever) *Server {
+	s := &Server{cfg: cfg, store: st, engine: eng, hub: hub, loop: loop, transcriber: tr, retriever: retriever, mux: http.NewServeMux()}
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(metrics.NewCollector(eng, st))
@@ -57,6 +59,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/calls/{id}/summary", s.handleGetSummary)
 	s.mux.HandleFunc("GET /api/calls/{id}/score", s.handleGetScore)
 	s.mux.HandleFunc("GET /api/routing/best-agent", s.handleBestAgent)
+	s.mux.HandleFunc("GET /api/kb", s.handleListKB)
+	s.mux.HandleFunc("POST /api/kb", s.handleCreateKB)
+	s.mux.HandleFunc("GET /api/kb/search", s.handleSearchKB)
+	s.mux.HandleFunc("GET /api/kb/{id}", s.handleGetKB)
+	s.mux.HandleFunc("DELETE /api/kb/{id}", s.handleDeleteKB)
 	s.mux.HandleFunc("POST /api/calls/{id}/flag", s.handleFlagCall)
 	s.mux.HandleFunc("POST /api/calls/{id}/route", s.handleRouteCall)
 	s.mux.Handle("/", http.FileServer(http.Dir("./web")))
@@ -276,6 +283,82 @@ func (s *Server) handleRouteCall(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": fmt.Sprintf("call %s routed to agent %s", id, req.AgentID),
 	})
+}
+
+func (s *Server) handleListKB(w http.ResponseWriter, r *http.Request) {
+	articles, err := s.store.ListKBArticles()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if articles == nil {
+		articles = []*models.KBArticle{}
+	}
+	writeJSON(w, http.StatusOK, articles)
+}
+
+func (s *Server) handleCreateKB(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title   string   `json:"title"`
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Title == "" || req.Content == "" {
+		writeError(w, http.StatusBadRequest, "title and content are required")
+		return
+	}
+	a := &models.KBArticle{
+		ID:        uuid.NewString(),
+		Title:     req.Title,
+		Content:   req.Content,
+		Tags:      req.Tags,
+		CreatedAt: time.Now(),
+	}
+	if err := s.store.InsertKBArticle(a); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, a)
+}
+
+func (s *Server) handleGetKB(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	a, err := s.store.GetKBArticle(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if a == nil {
+		writeError(w, http.StatusNotFound, "article not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+func (s *Server) handleDeleteKB(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.store.DeleteKBArticle(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id})
+}
+
+func (s *Server) handleSearchKB(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeError(w, http.StatusBadRequest, "q parameter required")
+		return
+	}
+	results, err := s.retriever.Search(q, 5)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if results == nil {
+		results = []*models.KBArticle{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"query": q, "results": results, "count": len(results)})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

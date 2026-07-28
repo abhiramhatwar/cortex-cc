@@ -85,6 +85,14 @@ type Event struct {
 	Payload interface{} `json:"payload"`
 }
 
+type KBArticle struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Content   string    `json:"content"`
+	Tags      []string  `json:"tags"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type CallScore struct {
 	CallID          string    `json:"call_id"`
 	Empathy         int       `json:"empathy"`         // 1-10
