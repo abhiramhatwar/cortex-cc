@@ -9,13 +9,13 @@ import (
 	"io"
 	"time"
 
-	"github.com/abhiram/cortex-cc/internal/config"
-	"github.com/abhiram/cortex-cc/internal/engine"
-	"github.com/abhiram/cortex-cc/internal/llm"
-	"github.com/abhiram/cortex-cc/internal/models"
-	"github.com/abhiram/cortex-cc/internal/store"
-	"github.com/abhiram/cortex-cc/internal/transcriber"
-	ws "github.com/abhiram/cortex-cc/internal/websocket"
+	"github.com/abhiramhatwar/cortex-cc/internal/config"
+	"github.com/abhiramhatwar/cortex-cc/internal/engine"
+	"github.com/abhiramhatwar/cortex-cc/internal/llm"
+	"github.com/abhiramhatwar/cortex-cc/internal/models"
+	"github.com/abhiramhatwar/cortex-cc/internal/store"
+	"github.com/abhiramhatwar/cortex-cc/internal/transcriber"
+	ws "github.com/abhiramhatwar/cortex-cc/internal/websocket"
 )
 
 type Server struct {

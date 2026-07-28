@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/abhiram/cortex-cc/internal/llm"
-	"github.com/abhiram/cortex-cc/internal/models"
-	"github.com/abhiram/cortex-cc/internal/store"
-	ws "github.com/abhiram/cortex-cc/internal/websocket"
+	"github.com/abhiramhatwar/cortex-cc/internal/llm"
+	"github.com/abhiramhatwar/cortex-cc/internal/models"
+	"github.com/abhiramhatwar/cortex-cc/internal/store"
+	ws "github.com/abhiramhatwar/cortex-cc/internal/websocket"
 )
 
 const (

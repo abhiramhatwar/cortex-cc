@@ -7,17 +7,17 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/abhiram/cortex-cc/internal/assist"
-	"github.com/abhiram/cortex-cc/internal/config"
-	"github.com/abhiram/cortex-cc/internal/engine"
-	"github.com/abhiram/cortex-cc/internal/llm"
-	"github.com/abhiram/cortex-cc/internal/mcp"
-	"github.com/abhiram/cortex-cc/internal/monitor"
-	"github.com/abhiram/cortex-cc/internal/sentiment"
-	"github.com/abhiram/cortex-cc/internal/server"
-	"github.com/abhiram/cortex-cc/internal/store"
-	"github.com/abhiram/cortex-cc/internal/transcriber"
-	ws "github.com/abhiram/cortex-cc/internal/websocket"
+	"github.com/abhiramhatwar/cortex-cc/internal/assist"
+	"github.com/abhiramhatwar/cortex-cc/internal/config"
+	"github.com/abhiramhatwar/cortex-cc/internal/engine"
+	"github.com/abhiramhatwar/cortex-cc/internal/llm"
+	"github.com/abhiramhatwar/cortex-cc/internal/mcp"
+	"github.com/abhiramhatwar/cortex-cc/internal/monitor"
+	"github.com/abhiramhatwar/cortex-cc/internal/sentiment"
+	"github.com/abhiramhatwar/cortex-cc/internal/server"
+	"github.com/abhiramhatwar/cortex-cc/internal/store"
+	"github.com/abhiramhatwar/cortex-cc/internal/transcriber"
+	ws "github.com/abhiramhatwar/cortex-cc/internal/websocket"
 )
 
 func main() {

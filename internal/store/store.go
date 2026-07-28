@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/abhiram/cortex-cc/internal/models"
+	"github.com/abhiramhatwar/cortex-cc/internal/models"
 	_ "modernc.org/sqlite"
 )
 

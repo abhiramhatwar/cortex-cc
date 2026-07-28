@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiram/cortex-cc/internal/models"
-	"github.com/abhiram/cortex-cc/internal/store"
+	"github.com/abhiramhatwar/cortex-cc/internal/models"
+	"github.com/abhiramhatwar/cortex-cc/internal/store"
 )
 
 func newTestEngine(t *testing.T) *Engine {

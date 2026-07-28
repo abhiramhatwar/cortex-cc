@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/abhiram/cortex-cc/internal/engine"
-	"github.com/abhiram/cortex-cc/internal/models"
-	"github.com/abhiram/cortex-cc/internal/store"
+	"github.com/abhiramhatwar/cortex-cc/internal/engine"
+	"github.com/abhiramhatwar/cortex-cc/internal/models"
+	"github.com/abhiramhatwar/cortex-cc/internal/store"
 )
 
 // ToolRegistry holds all MCP tool definitions and their handlers.
