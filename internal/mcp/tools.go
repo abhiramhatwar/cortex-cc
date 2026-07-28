@@ -125,6 +125,20 @@ func allDefinitions() []ToolDef {
 				}`),
 			},
 		},
+		{
+			Type: "function",
+			Function: ToolFunction{
+				Name:        "find_best_agent",
+				Description: "Returns the best available agent for a given queue using skills-based scoring: primary skill match > secondary skill > fallback, then tiebroken by fewest calls handled today. Also returns a human-readable routing reason.",
+				Parameters: json.RawMessage(`{
+					"type":"object",
+					"properties":{
+						"queue":{"type":"string","description":"Queue name: Sales, Billing, or Support"}
+					},
+					"required":["queue"]
+				}`),
+			},
+		},
 	}
 }
 
@@ -151,6 +165,9 @@ func (r *ToolRegistry) Execute(name string, args map[string]any) (string, error)
 	case "summarize_call":
 		id, _ := args["call_id"].(string)
 		return r.summarizeCall(id)
+	case "find_best_agent":
+		queue, _ := args["queue"].(string)
+		return r.findBestAgent(queue)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -345,6 +362,32 @@ func (r *ToolRegistry) summarizeCall(callID string) (string, error) {
 		"call_id":    callID,
 		"transcript": sb.String(),
 		"instruction": "Generate a JSON summary with fields: issue, resolution, follow_up, sentiment_label (positive/neutral/negative)",
+	})
+}
+
+func (r *ToolRegistry) findBestAgent(queue string) (string, error) {
+	if queue == "" {
+		return "", fmt.Errorf("queue is required")
+	}
+	agent, reason := r.engine.BestAgentFor(queue)
+	if agent == nil {
+		return marshal(map[string]any{
+			"queue":  queue,
+			"agent":  nil,
+			"reason": reason,
+		})
+	}
+	return marshal(map[string]any{
+		"queue":  queue,
+		"reason": reason,
+		"agent": map[string]any{
+			"id":                    agent.ID,
+			"name":                  agent.Name,
+			"status":                agent.Status,
+			"skills":                agent.Skills,
+			"calls_handled_today":   agent.CallsHandled,
+			"avg_handle_time_seconds": agent.AvgHandleTime,
+		},
 	})
 }
 

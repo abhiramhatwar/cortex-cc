@@ -56,6 +56,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/calls/{id}/transcript", s.handleGetTranscript)
 	s.mux.HandleFunc("GET /api/calls/{id}/summary", s.handleGetSummary)
 	s.mux.HandleFunc("GET /api/calls/{id}/score", s.handleGetScore)
+	s.mux.HandleFunc("GET /api/routing/best-agent", s.handleBestAgent)
 	s.mux.HandleFunc("POST /api/calls/{id}/flag", s.handleFlagCall)
 	s.mux.HandleFunc("POST /api/calls/{id}/route", s.handleRouteCall)
 	s.mux.Handle("/", http.FileServer(http.Dir("./web")))
@@ -219,6 +220,20 @@ func (s *Server) handleGetScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, score)
+}
+
+func (s *Server) handleBestAgent(w http.ResponseWriter, r *http.Request) {
+	queue := r.URL.Query().Get("queue")
+	if queue == "" {
+		writeError(w, http.StatusBadRequest, "queue parameter required: Sales, Billing, or Support")
+		return
+	}
+	agent, reason := s.engine.BestAgentFor(queue)
+	if agent == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"agent": nil, "reason": reason, "queue": queue})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agent": agent, "reason": reason, "queue": queue})
 }
 
 func (s *Server) handleFlagCall(w http.ResponseWriter, r *http.Request) {

@@ -82,6 +82,7 @@
               <th class="text-left py-2 font-medium">Queue</th>
               <th class="text-left py-2 font-medium">Status</th>
               <th class="text-left py-2 font-medium">Wait</th>
+              <th class="text-left py-2 font-medium">Routing</th>
               <th class="text-left py-2 font-medium">Sentiment</th>
             </tr>
           </thead>
@@ -229,12 +230,16 @@
       const wait = c.status === 'queued' ? c.wait_seconds : c.talk_seconds;
       const sentColor = c.sentiment > 0.3 ? '#4ade80' : c.sentiment < -0.3 ? '#f87171' : '#fb923c';
       const slaFlag = c.sla_breached ? ' <span class="text-red-400">⚠</span>' : '';
+      const routingNote = c.routing_note
+        ? `<span class="text-slate-500 text-xs" title="${c.routing_note}">⚡ ${c.routing_note.split(':')[0]}</span>`
+        : '';
       return `<tr class="border-b border-slate-800 hover:bg-slate-800/40">
         <td class="py-2 font-mono text-violet-400">${c.id}${slaFlag}</td>
         <td class="py-2">${c.caller_name || c.caller_number}</td>
         <td class="py-2 text-slate-400">${c.queue_name}</td>
         <td class="py-2"><span class="badge-${c.status} px-2 py-0.5 rounded-full text-xs">${c.status}</span></td>
         <td class="py-2 ${wait > 90 ? 'text-red-400 font-bold' : ''}">${wait}s</td>
+        <td class="py-2">${routingNote}</td>
         <td class="py-2">
           <div class="w-20 bg-slate-700 sentiment-bar">
             <div class="sentiment-bar" style="width:${Math.round((c.sentiment+1)/2*100)}%;background:${sentColor}"></div>

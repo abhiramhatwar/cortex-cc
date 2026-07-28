@@ -24,8 +24,8 @@ func newTestRegistry(t *testing.T) *ToolRegistry {
 func TestDefinitionsCount(t *testing.T) {
 	r := newTestRegistry(t)
 	defs := r.Definitions()
-	if len(defs) != 7 {
-		t.Errorf("expected 7 tool definitions, got %d", len(defs))
+	if len(defs) != 8 {
+		t.Errorf("expected 8 tool definitions, got %d", len(defs))
 	}
 }
 
@@ -39,6 +39,7 @@ func TestDefinitionNames(t *testing.T) {
 		"route_call":          true,
 		"flag_call":           true,
 		"summarize_call":      true,
+		"find_best_agent":     true,
 	}
 	for _, d := range r.Definitions() {
 		name := d.Function.Name

@@ -664,7 +664,60 @@ Docker Compose includes Prometheus on port `9090` with `prometheus.yml` pre-conf
 
 ---
 
-### 11. Proactive Monitor
+### 11. Skills-Based Intelligent Routing
+
+Every time a queued call is auto-assigned to an agent, the engine scores all available agents with a three-tier algorithm instead of picking the first one found.
+
+```
+Call enters queue
+      │
+      ▼
+findBestAgentFor(queue)
+      │
+      ├── Score 2: Primary skill match
+      │     agent.Skills[0] == queue
+      │     → queue is this agent's preferred specialisation
+      │
+      ├── Score 1: Secondary skill match
+      │     queue ∈ agent.Skills (but not index 0)
+      │     → agent is multi-skilled, can handle this queue
+      │
+      └── Score 0: No-skill fallback
+            no matching skill — least-loaded available agent
+            prevents indefinite queue starvation
+
+  Tiebreak 1: fewest calls_handled_today (least loaded agent)
+  Tiebreak 2: lowest avg_handle_time_seconds
+
+  Winner stamped on call: routing_note = "primary skill: Billing specialist (3 calls today)"
+  Broadcast with call_answered event → visible on dashboard Routing column
+```
+
+**API — explain routing decision without committing:**
+
+```
+GET /api/routing/best-agent?queue=Billing
+
+Response 200:
+{
+  "queue": "Billing",
+  "reason": "primary skill: Billing specialist (3 calls today)",
+  "agent": {
+    "id": "uuid-...",
+    "name": "Priya Sharma",
+    "status": "available",
+    "skills": ["Billing", "Support"],
+    "calls_handled": 3,
+    "avg_handle_time_seconds": 212.5
+  }
+}
+```
+
+**MCP tool `find_best_agent`** — exposes the same algorithm to the LLM copilot. The supervisor can ask *"who's the best agent for a Billing call right now?"* and get an explainable answer.
+
+---
+
+### 12. Proactive Monitor
 
 The monitor runs independently of any user query. Every 60 seconds it calls the tool registry directly, computes anomalies, and fires alerts automatically.
 
@@ -724,6 +777,7 @@ The monitor runs independently of any user query. Every 60 seconds it calls the 
 | **Agent Monitoring** | Status, calls handled, avg handle time per agent | Polled every 5s via REST |
 | **SLA Tracking** | Breach detection at 120s wait threshold | Immediate WS event + visual flag |
 | **Sentiment Scoring** | Per-call NLP score updated on every customer line | DistilBERT EMA, [-1.0, 1.0] |
+| **Skills-Based Routing** | Auto-assigns calls to best-skilled agent using 3-tier score | Primary > secondary > fallback, tiebreak by load |
 | **Prometheus Metrics** | `/metrics` endpoint with 6 custom metric families | Pull-based, no background goroutine |
 | **Proactive Monitor** | Autonomous anomaly detection every 60s | No supervisor query needed |
 | **AI Advisories** | LLM-written action recommendations on anomaly | 2-3 sentence, concrete |
@@ -944,6 +998,32 @@ Response 200:
 }
 
 Response 404: { "error": "score not yet available — QA scoring happens asynchronously after call completion" }
+```
+
+```
+GET /api/routing/best-agent?queue=Billing
+
+Returns the highest-scoring available agent for the given queue (no side effects).
+Use this to preview routing decisions before committing.
+
+Response 200:
+{
+  "queue": "Billing",
+  "reason": "primary skill: Billing specialist (3 calls today)",
+  "agent": {
+    "id": "uuid-...",
+    "name": "Priya Sharma",
+    "status": "available",
+    "skills": ["Billing", "Support"],
+    "calls_handled": 3,
+    "avg_handle_time_seconds": 212.5
+  }
+}
+
+Response 200 (no available agents):
+{ "queue": "Billing", "agent": null, "reason": "no available agents for Billing" }
+
+Response 400: { "error": "queue parameter required: Sales, Billing, or Support" }
 ```
 
 ### Agents

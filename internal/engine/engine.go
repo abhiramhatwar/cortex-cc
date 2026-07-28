@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -226,13 +227,14 @@ func (e *Engine) tick() {
 				e.emit("call_abandoned", c)
 				continue
 			}
-			// assign to available agent
-			if agent := e.findAvailableAgentFor(c.QueueName); agent != nil {
+			// assign to best-scored available agent
+			if r := e.findBestAgentFor(c.QueueName); r != nil {
 				c.Status = models.CallStatusActive
-				c.AgentID = agent.ID
-				agent.Status = models.AgentStatusBusy
-				agent.CurrentCallID = c.ID
-				e.store.UpsertAgent(agent)
+				c.AgentID = r.agent.ID
+				c.RoutingNote = r.reason
+				r.agent.Status = models.AgentStatusBusy
+				r.agent.CurrentCallID = c.ID
+				e.store.UpsertAgent(r.agent)
 				e.emit("call_answered", c)
 			}
 
@@ -277,11 +279,60 @@ func (e *Engine) completeCall(c *models.Call, now time.Time) {
 	}
 }
 
-func (e *Engine) findAvailableAgentFor(queue string) *models.Agent {
+// BestAgentFor returns the highest-scoring available agent for a queue and
+// a human-readable explanation of why they were selected. Safe to call from
+// outside the engine — acquires its own read lock.
+func (e *Engine) BestAgentFor(queue string) (*models.Agent, string) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	r := e.findBestAgentFor(queue)
+	if r == nil {
+		return nil, "no available agents for " + queue
+	}
+	return r.agent, r.reason
+}
+
+type routeResult struct {
+	agent  *models.Agent
+	score  int
+	reason string
+}
+
+// findBestAgentFor selects the best available agent using a three-tier score:
+//
+//	2 = primary skill (queue is agent's first/preferred skill)
+//	1 = secondary skill (queue is in agent's skill list but not primary)
+//	0 = no-skill fallback (any available agent)
+//
+// Tiebreaks: fewest calls handled today, then lower average handle time.
+// Must be called with e.mu held (read or write).
+func (e *Engine) findBestAgentFor(queue string) *routeResult {
+	var best *routeResult
 	for _, a := range e.agents {
-		if a.Status == models.AgentStatusAvailable && hasSkill(a.Skills, queue) {
-			return a
+		if a.Status != models.AgentStatusAvailable {
+			continue
+		}
+		score := 0
+		if len(a.Skills) > 0 && a.Skills[0] == queue {
+			score = 2
+		} else if hasSkill(a.Skills, queue) {
+			score = 1
+		}
+		if best == nil ||
+			score > best.score ||
+			(score == best.score && a.CallsHandled < best.agent.CallsHandled) ||
+			(score == best.score && a.CallsHandled == best.agent.CallsHandled && a.AvgHandleTime < best.agent.AvgHandleTime) {
+			r := &routeResult{agent: a, score: score}
+			switch score {
+			case 2:
+				r.reason = fmt.Sprintf("primary skill: %s specialist (%d calls today)", queue, a.CallsHandled)
+			case 1:
+				r.reason = fmt.Sprintf("secondary skill: multi-skilled agent (%d calls today)", a.CallsHandled)
+			default:
+				r.reason = fmt.Sprintf("no-skill fallback: least-loaded available agent (%d calls today)", a.CallsHandled)
+			}
+			best = r
 		}
 	}
-	return nil
+	return best
 }

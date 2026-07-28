@@ -44,6 +44,7 @@ type Call struct {
 	EndedAt      *time.Time `json:"ended_at,omitempty"`
 	Flagged      bool       `json:"flagged"`
 	FlagReason   string     `json:"flag_reason,omitempty"`
+	RoutingNote  string     `json:"routing_note,omitempty"`
 }
 
 type Transcript struct {
