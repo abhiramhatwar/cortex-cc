@@ -60,9 +60,9 @@ The supervisor gets an answer. Zero bytes left the building.
 | **Proactive Alerts** | ✅ Built | Monitor polls every 60s, fires alerts + AI advisory without being asked |
 | **Post-Call Summaries** | ✅ Built | Structured JSON summary (issue, resolution, follow-up) auto-generated |
 | **Supervisor Dashboard** | ✅ Built | Live HTML dashboard — agents, queues, alerts, AI chat panel |
-| **Real-Time Transcription** | 🔧 Coming | Whisper-powered on-prem speech-to-text |
-| **Sentiment Analysis** | 🔧 Coming | HuggingFace local sentiment pipeline with per-call scoring |
-| **Agent Assist** | 🔧 Coming | Real-time suggested responses surfaced to agents during live calls |
+| **Real-Time Transcription** | ✅ Built | Whisper-powered on-prem speech-to-text via `/api/transcribe` |
+| **Sentiment Analysis** | ✅ Built | HuggingFace DistilBERT local pipeline with EMA per-call scoring |
+| **Agent Assist** | ✅ Built | Real-time Ollama-generated response suggestions during live calls |
 | **Fully On-Prem** | ✅ Built | Ollama + local models — nothing leaves your server |
 
 ---
@@ -286,10 +286,24 @@ cortex-cc/
 │   │   └── loop.go              # Agentic loop — multi-turn, max 5 tool rounds
 │   ├── monitor/
 │   │   └── monitor.go           # Proactive anomaly detection + AI advisories
+│   ├── sentiment/
+│   │   └── client.go            # Go HTTP client for DistilBERT sentiment service
+│   ├── transcriber/
+│   │   └── client.go            # Go HTTP client for Whisper STT service
+│   ├── assist/
+│   │   └── service.go           # Agent assist — rate-limited real-time suggestions
 │   └── server/
-│       └── server.go            # HTTP handlers: REST API + /api/chat
+│       └── server.go            # HTTP handlers: REST API + /api/chat + /api/transcribe
 ├── web/
 │   └── index.html               # Supervisor dashboard (Tailwind, dark theme, WebSocket)
+├── whisper/
+│   ├── service.py               # FastAPI Whisper STT microservice (port 8001)
+│   └── Dockerfile
+├── sentiment/
+│   ├── service.py               # FastAPI DistilBERT sentiment microservice (port 5001)
+│   └── Dockerfile
+├── Makefile
+├── DEMO.md
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md
@@ -304,7 +318,9 @@ cortex-cc/
 | `PORT` | `8080` | HTTP server port |
 | `DB_PATH` | `cortex.db` | SQLite database file path |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `llama3.1:8b` | Model to use for tool-calling |
+| `OLLAMA_MODEL` | `llama3.1:8b` | Model to use for tool-calling and agent assist |
+| `WHISPER_URL` | `http://localhost:8001` | Whisper STT microservice URL |
+| `SENTIMENT_URL` | `http://localhost:5001` | DistilBERT sentiment microservice URL |
 
 ---
 
@@ -326,11 +342,12 @@ cortex-cc/
 - [x] Supervisor dashboard — live queues, agent tiles, AI chat panel
 - [x] Proactive anomaly monitor — SLA, sentiment, queue overload, agent shortage
 - [x] AI advisory generation — LLM writes 2–3 sentence supervisor brief on anomaly
-- [ ] Whisper transcription pipeline — on-prem speech-to-text for real audio
-- [ ] HuggingFace sentiment microservice — Python Docker service, real NLP scoring
-- [ ] Agent assist — real-time response suggestions during active calls
-- [ ] End-to-end tests + load test with 100 concurrent simulated calls
-- [ ] Demo script + video walkthrough
+- [x] Whisper transcription pipeline — FastAPI microservice, on-prem STT via `/api/transcribe`
+- [x] HuggingFace sentiment microservice — DistilBERT, Docker service, real NLP scoring + EMA
+- [x] Agent assist — real-time Llama 3.1:8b response suggestions broadcast per customer line
+- [x] Unit tests — engine + MCP tools, SQLite in-memory, race-safe
+- [x] Makefile — run, build, test, docker targets
+- [x] DEMO.md — step-by-step hiring-manager demo script
 
 ---
 
