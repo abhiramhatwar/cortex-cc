@@ -93,7 +93,7 @@ func (e *Engine) GetAgents() []*models.Agent {
 func (e *Engine) GetActiveCalls() []*models.Call {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	var out []*models.Call
+	out := make([]*models.Call, 0)
 	for _, c := range e.calls {
 		cp := *c
 		out = append(out, &cp)

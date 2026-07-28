@@ -9,6 +9,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/uuid"
+
 	"cortex-cc/internal/config"
 	"cortex-cc/internal/engine"
 	"cortex-cc/internal/llm"
@@ -169,6 +171,7 @@ func (s *Server) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		base := time.Now().Add(-time.Duration(result.Duration) * time.Second)
 		for _, seg := range result.Segments {
 			t := &models.Transcript{
+				ID:        uuid.NewString(),
 				CallID:    callID,
 				Speaker:   speaker,
 				Text:      seg.Text,
