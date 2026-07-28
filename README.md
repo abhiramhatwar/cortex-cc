@@ -243,24 +243,6 @@ curl -X POST http://localhost:8080/api/chat \
 curl -X POST http://localhost:8080/api/chat/reset
 ```
 
-### Connect via Claude Desktop (MCP)
-
-Add this to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "cortex-cc": {
-      "command": "go",
-      "args": ["run", "./cmd/server"],
-      "cwd": "/path/to/cortex-cc"
-    }
-  }
-}
-```
-
-Claude can now call all 7 contact center tools directly.
-
 ---
 
 ## Why This Matters
