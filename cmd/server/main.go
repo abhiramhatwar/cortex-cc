@@ -9,6 +9,9 @@ import (
 
 	"github.com/abhiram/cortex-cc/internal/config"
 	"github.com/abhiram/cortex-cc/internal/engine"
+	"github.com/abhiram/cortex-cc/internal/llm"
+	"github.com/abhiram/cortex-cc/internal/mcp"
+	"github.com/abhiram/cortex-cc/internal/monitor"
 	"github.com/abhiram/cortex-cc/internal/server"
 	"github.com/abhiram/cortex-cc/internal/store"
 	ws "github.com/abhiram/cortex-cc/internal/websocket"
@@ -33,6 +36,18 @@ func main() {
 	eng.Start(ctx)
 	go hub.Run(eng.Events)
 
-	srv := server.New(cfg, st, eng, hub)
+	// wire up the AI copilot: Ollama client → tool registry → agentic loop
+	llmClient := llm.NewClient(cfg.OllamaURL, cfg.OllamaModel)
+	if err := llmClient.Ping(); err != nil {
+		log.Printf("warning: ollama not reachable (%v) — AI copilot will be unavailable", err)
+	}
+	registry := mcp.NewToolRegistry(eng, st)
+	loop := llm.NewLoop(llmClient, registry)
+
+	// proactive anomaly monitor: polls every 60s, broadcasts alerts + AI advisories
+	mon := monitor.New(registry, loop, hub)
+	mon.Start(ctx)
+
+	srv := server.New(cfg, st, eng, hub, loop)
 	log.Fatal(srv.Start())
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/abhiram/cortex-cc/internal/config"
 	"github.com/abhiram/cortex-cc/internal/engine"
+	"github.com/abhiram/cortex-cc/internal/llm"
 	"github.com/abhiram/cortex-cc/internal/store"
 	ws "github.com/abhiram/cortex-cc/internal/websocket"
 )
@@ -17,11 +18,12 @@ type Server struct {
 	store  *store.Store
 	engine *engine.Engine
 	hub    *ws.Hub
+	loop   *llm.Loop
 	mux    *http.ServeMux
 }
 
-func New(cfg *config.Config, st *store.Store, eng *engine.Engine, hub *ws.Hub) *Server {
-	s := &Server{cfg: cfg, store: st, engine: eng, hub: hub, mux: http.NewServeMux()}
+func New(cfg *config.Config, st *store.Store, eng *engine.Engine, hub *ws.Hub, loop *llm.Loop) *Server {
+	s := &Server{cfg: cfg, store: st, engine: eng, hub: hub, loop: loop, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -29,12 +31,14 @@ func New(cfg *config.Config, st *store.Store, eng *engine.Engine, hub *ws.Hub) *
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /ws", s.hub.ServeWS)
+	s.mux.HandleFunc("POST /api/chat", s.handleChat)
+	s.mux.HandleFunc("POST /api/chat/reset", s.handleChatReset)
 	s.mux.HandleFunc("GET /api/calls", s.handleGetCalls)
 	s.mux.HandleFunc("GET /api/agents", s.handleGetAgents)
 	s.mux.HandleFunc("GET /api/queues", s.handleGetQueues)
 	s.mux.HandleFunc("GET /api/calls/{id}/transcript", s.handleGetTranscript)
 	s.mux.HandleFunc("GET /api/calls/{id}/summary", s.handleGetSummary)
-	s.mux.Handle("GET /", http.FileServer(http.Dir("./web")))
+	s.mux.Handle("/", http.FileServer(http.Dir("./web")))
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +80,28 @@ func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, transcripts)
+}
+
+func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+		writeError(w, http.StatusBadRequest, "message is required")
+		return
+	}
+	reply, err := s.loop.Chat(req.Message)
+	if err != nil {
+		log.Printf("chat error: %v", err)
+		writeJSON(w, http.StatusOK, map[string]string{"reply": "AI unavailable — is Ollama running? " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"reply": reply})
+}
+
+func (s *Server) handleChatReset(w http.ResponseWriter, r *http.Request) {
+	s.loop.ResetHistory()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "conversation reset"})
 }
 
 func (s *Server) handleGetSummary(w http.ResponseWriter, r *http.Request) {

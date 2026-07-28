@@ -73,6 +73,12 @@ type QueueStats struct {
 	AbandonRate    float64 `json:"abandon_rate"`
 }
 
+const (
+	EventTypeCallUpdate  = "call_update"
+	EventTypeAgentUpdate = "agent_update"
+	EventTypeAlert       = "alert"
+)
+
 type Event struct {
 	Type    string      `json:"type"`
 	Payload interface{} `json:"payload"`
