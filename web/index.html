@@ -21,6 +21,9 @@
     ::-webkit-scrollbar-thumb { background:#334155; border-radius:2px; }
     .pulse { animation: pulse 2s infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+    .assist-card { background: #0f2744; border: 1px solid #1d4ed8; border-radius: 10px; }
+    .assist-slide { animation: slideIn 0.3s ease-out; }
+    @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
   </style>
 </head>
 <body class="min-h-screen p-4">
@@ -93,6 +96,21 @@
   <!-- Alerts -->
   <div id="alerts-box" class="mt-4 space-y-2"></div>
 
+  <!-- Agent Assist Panel -->
+  <div class="mt-4 card p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <div class="w-5 h-5 rounded bg-blue-700 flex items-center justify-center text-xs font-bold text-white">A</div>
+        <h2 class="text-sm font-semibold text-white">Agent Assist</h2>
+        <span class="text-xs text-slate-500">— real-time suggestions · powered by Ollama on-prem</span>
+      </div>
+      <span id="assist-count" class="text-xs text-slate-500">0 suggestions</span>
+    </div>
+    <div id="assist-list" class="space-y-2 max-h-52 overflow-y-auto">
+      <p class="text-xs text-slate-600 italic">Suggestions appear here when customers speak on active calls...</p>
+    </div>
+  </div>
+
   <!-- AI Copilot Chat -->
   <div class="mt-4 card p-4" style="height:340px; display:flex; flex-direction:column;">
     <div class="flex items-center gap-2 mb-3">
@@ -113,7 +131,7 @@
   </div>
 
 <script>
-  const state = { calls: {}, agents: {}, slaCount: 0 };
+  const state = { calls: {}, agents: {}, slaCount: 0, assistCount: 0 };
 
   // ── WebSocket ──────────────────────────────────────────────────────────────
   function connect() {
@@ -153,9 +171,19 @@
         break;
       case 'sentiment_update':
         if (p.sentiment < -0.3) {
-          pushAlert(`😤 Negative sentiment on call ${p.id} with ${p.caller_name}`);
+          pushAlert(`Negative sentiment on call ${p.id} with ${p.caller_name}`);
         }
         if (state.calls[p.id]) state.calls[p.id].sentiment = p.sentiment;
+        break;
+      case 'alert':
+        if (p.source === 'ai_advisory') {
+          pushAlert(`AI Advisory: ${p.detail}`, 'advisory');
+        } else {
+          pushAlert(`[${p.level?.toUpperCase()}] ${p.title}: ${p.detail}`);
+        }
+        break;
+      case 'agent_assist':
+        pushAssist(p);
         break;
     }
     render();
@@ -212,13 +240,47 @@
   }
 
   // ── Alerts ────────────────────────────────────────────────────────────────
-  function pushAlert(msg) {
+  function pushAlert(msg, type = 'error') {
     const box = document.getElementById('alerts-box');
     const el = document.createElement('div');
-    el.className = 'card p-3 text-xs text-red-300 border-red-900';
+    const isAdvisory = type === 'advisory';
+    el.className = `card p-3 text-xs ${isAdvisory ? 'text-violet-300 border-violet-900' : 'text-red-300 border-red-900'}`;
     el.textContent = msg;
     box.prepend(el);
-    setTimeout(() => el.remove(), 12000);
+    setTimeout(() => el.remove(), isAdvisory ? 20000 : 12000);
+  }
+
+  // ── Agent Assist ──────────────────────────────────────────────────────────
+  function pushAssist(p) {
+    state.assistCount++;
+    document.getElementById('assist-count').textContent = `${state.assistCount} suggestions`;
+    const list = document.getElementById('assist-list');
+
+    // Remove placeholder text on first suggestion
+    const placeholder = list.querySelector('p.italic');
+    if (placeholder) placeholder.remove();
+
+    const el = document.createElement('div');
+    el.className = 'assist-card assist-slide p-3';
+    el.innerHTML = `
+      <div class="flex items-start justify-between gap-2">
+        <div class="flex-1">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-xs font-mono text-blue-400">${p.call_id}</span>
+            <span class="text-xs text-slate-500">${p.queue}</span>
+          </div>
+          <p class="text-xs text-slate-400 mb-1">Customer: <em>"${p.trigger}"</em></p>
+          <p class="text-xs text-white font-medium">${p.suggestion}</p>
+        </div>
+        <button onclick="this.closest('.assist-card').remove()" class="text-slate-600 hover:text-slate-300 text-xs shrink-0">✕</button>
+      </div>`;
+    list.prepend(el);
+
+    // Keep only last 5 suggestions visible
+    while (list.children.length > 5) list.lastChild.remove();
+
+    // Auto-dismiss after 30s
+    setTimeout(() => el.remove(), 30000);
   }
 
   // ── AI Chat ───────────────────────────────────────────────────────────────
