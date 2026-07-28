@@ -10,6 +10,7 @@ type Config struct {
 	DBPath      string
 	OllamaURL   string
 	OllamaModel string
+	WhisperURL  string
 	HFToken     string
 }
 
@@ -19,6 +20,7 @@ func Load() *Config {
 		DBPath:      getEnv("DB_PATH", "./cortex.db"),
 		OllamaURL:   getEnv("OLLAMA_URL", "http://localhost:11434"),
 		OllamaModel: getEnv("OLLAMA_MODEL", "llama3.1:8b"),
+		WhisperURL:  getEnv("WHISPER_URL", "http://localhost:8001"),
 		HFToken:     getEnv("HF_TOKEN", ""),
 	}
 }
