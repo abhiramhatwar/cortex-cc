@@ -13,6 +13,7 @@ import (
 	"cortex-cc/internal/kb"
 	"cortex-cc/internal/llm"
 	"cortex-cc/internal/mcp"
+	"cortex-cc/internal/models"
 	"cortex-cc/internal/monitor"
 	"cortex-cc/internal/qa"
 	"cortex-cc/internal/sentiment"
@@ -65,7 +66,10 @@ func main() {
 
 	// post-call QA scorer: scores every completed call using Ollama, stores + broadcasts result
 	qaSvc := qa.New(llmClient, st, hub)
-	eng.OnCallCompleted = qaSvc.ScoreCall
+	eng.OnCallCompleted = func(call *models.Call) {
+		assistSvc.Cleanup(call.ID)
+		qaSvc.ScoreCall(call)
+	}
 
 	// proactive anomaly monitor: polls every 60s, broadcasts alerts + AI advisories
 	mon := monitor.New(registry, loop, hub)

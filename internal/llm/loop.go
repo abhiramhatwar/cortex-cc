@@ -38,11 +38,17 @@ func NewLoop(client *Client, registry *mcp.ToolRegistry) *Loop {
 	}
 }
 
+const maxHistoryMessages = 20 // system prompt + this many messages before trimming
+
 // Chat sends a user message, runs the tool loop, and returns the final reply.
 func (l *Loop) Chat(userMsg string) (string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	// Keep history bounded so we never exceed the model's context window.
+	if len(l.history) > maxHistoryMessages {
+		l.history = append(l.history[:1], l.history[len(l.history)-maxHistoryMessages+1:]...)
+	}
 	l.history = append(l.history, Message{Role: "user", Content: userMsg})
 	tools := l.registry.Definitions()
 
@@ -93,4 +99,10 @@ func (l *Loop) ResetHistory() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.history = []Message{{Role: "system", Content: systemPrompt}}
+}
+
+// OneShot generates a single AI response without touching the shared conversation history.
+// Used by background services (monitor, etc.) that must not inject prompts into the supervisor chat.
+func (l *Loop) OneShot(system, prompt string) (string, error) {
+	return l.client.OneShot(system, prompt)
 }

@@ -173,14 +173,16 @@ func (m *Monitor) detectAnomalies() []anomaly {
 	return out
 }
 
+const advisorySystem = `You are a contact center monitoring system.
+When given anomaly data, provide a brief (2-3 sentence) supervisor advisory with the single most important action to take right now.`
+
 func (m *Monitor) generateAdvisory(anomalies []anomaly) {
-	prompt := "Proactive monitor alert — current contact center anomalies detected:\n"
+	prompt := "Current contact center anomalies detected:\n"
 	for _, a := range anomalies {
 		prompt += fmt.Sprintf("- [%s] %s: %s\n", a.Level, a.Title, a.Detail)
 	}
-	prompt += "\nProvide a brief (2-3 sentence) supervisor advisory with the single most important action to take right now."
 
-	reply, err := m.loop.Chat(prompt)
+	reply, err := m.loop.OneShot(advisorySystem, prompt)
 	if err != nil {
 		log.Printf("monitor: advisory generation failed: %v", err)
 		return

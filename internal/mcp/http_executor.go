@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -51,6 +52,16 @@ func (h *HTTPExecutor) Execute(name string, args map[string]any) (string, error)
 	case "summarize_call":
 		id, _ := args["call_id"].(string)
 		return h.summarizeCall(id)
+	case "find_best_agent":
+		queue, _ := args["queue"].(string)
+		return h.findBestAgent(queue)
+	case "search_knowledge_base":
+		query, _ := args["query"].(string)
+		topK := 5
+		if v, ok := args["top_k"].(float64); ok && int(v) > 0 {
+			topK = int(v)
+		}
+		return h.searchKB(query, topK)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -80,6 +91,9 @@ func (h *HTTPExecutor) postJSON(path string, body, out any) error {
 		return fmt.Errorf("POST %s: %w", path, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("POST %s returned %d", path, resp.StatusCode)
+	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
@@ -244,6 +258,29 @@ func (h *HTTPExecutor) routeCall(callID, agentID string) (string, error) {
 	}
 	var result map[string]any
 	if err := h.postJSON("/api/calls/"+callID+"/route", map[string]string{"agent_id": agentID}, &result); err != nil {
+		return "", err
+	}
+	return marshal(result)
+}
+
+func (h *HTTPExecutor) findBestAgent(queue string) (string, error) {
+	if queue == "" {
+		return "", fmt.Errorf("queue is required")
+	}
+	var result map[string]any
+	if err := h.get("/api/routing/best-agent?queue="+url.QueryEscape(queue), &result); err != nil {
+		return "", err
+	}
+	return marshal(result)
+}
+
+func (h *HTTPExecutor) searchKB(query string, topK int) (string, error) {
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	var result map[string]any
+	path := fmt.Sprintf("/api/kb/search?q=%s&top_k=%d", url.QueryEscape(query), topK)
+	if err := h.get(path, &result); err != nil {
 		return "", err
 	}
 	return marshal(result)

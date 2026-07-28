@@ -121,7 +121,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	reply, err := s.loop.Chat(req.Message)
 	if err != nil {
 		log.Printf("chat error: %v", err)
-		writeJSON(w, http.StatusOK, map[string]string{"reply": "AI unavailable — is Ollama running? " + err.Error()})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"reply": "AI unavailable — is Ollama running? " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"reply": reply})
@@ -276,7 +276,7 @@ func (s *Server) handleRouteCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.engine.RouteCall(id, req.AgentID) {
-		writeError(w, http.StatusBadRequest, "could not route call — agent may be unavailable or call not found")
+		writeError(w, http.StatusUnprocessableEntity, "could not route call — call not found or agent unavailable")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -152,9 +153,10 @@ func (s *Store) GetRecentCalls(limit int) ([]*models.Call, error) {
 // ── Agents ─────────────────────────────────────────────────────────────────
 
 func (s *Store) UpsertAgent(a *models.Agent) error {
-	skills := "[]"
-	if len(a.Skills) > 0 {
-		skills = `["` + join(a.Skills, `","`) + `"]`
+	skillsBytes, _ := json.Marshal(a.Skills)
+	skills := string(skillsBytes)
+	if skills == "null" {
+		skills = "[]"
 	}
 	_, err := s.db.Exec(`
 		INSERT INTO agents (id, name, status, current_call_id, calls_handled, avg_handle_time, skills)
@@ -169,7 +171,7 @@ func (s *Store) UpsertAgent(a *models.Agent) error {
 
 func (s *Store) GetAllAgents() ([]*models.Agent, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, status, current_call_id, calls_handled, avg_handle_time
+		SELECT id, name, status, current_call_id, calls_handled, avg_handle_time, skills
 		FROM agents ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -179,10 +181,12 @@ func (s *Store) GetAllAgents() ([]*models.Agent, error) {
 	for rows.Next() {
 		a := &models.Agent{}
 		var currentCallID sql.NullString
-		if err := rows.Scan(&a.ID, &a.Name, &a.Status, &currentCallID, &a.CallsHandled, &a.AvgHandleTime); err != nil {
+		var skillsJSON string
+		if err := rows.Scan(&a.ID, &a.Name, &a.Status, &currentCallID, &a.CallsHandled, &a.AvgHandleTime, &skillsJSON); err != nil {
 			return nil, err
 		}
 		a.CurrentCallID = currentCallID.String
+		a.Skills = decodeJSON(skillsJSON)
 		agents = append(agents, a)
 	}
 	return agents, rows.Err()
@@ -428,17 +432,11 @@ func scanKBArticle(row kbScanner) (*models.KBArticle, error) {
 }
 
 func encodeJSON(ss []string) string {
-	if len(ss) == 0 {
+	b, _ := json.Marshal(ss)
+	if b == nil {
 		return "[]"
 	}
-	b := `[`
-	for i, s := range ss {
-		if i > 0 {
-			b += ","
-		}
-		b += `"` + s + `"`
-	}
-	return b + `]`
+	return string(b)
 }
 
 func decodeJSON(s string) []string {

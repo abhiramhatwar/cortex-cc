@@ -82,7 +82,10 @@ func bm25(queryTerms map[string]int, docText string) float64 {
 	const k1, b, avgLen = 1.5, 0.75, 150.0
 
 	docTerms := tokenize(docText)
-	docLen := float64(len(docTerms))
+	var docLen float64
+	for _, cnt := range docTerms {
+		docLen += float64(cnt)
+	}
 
 	var score float64
 	for term := range queryTerms {

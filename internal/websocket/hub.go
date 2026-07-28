@@ -82,8 +82,7 @@ func (c *client) readPump(h *Hub) {
 		h.mu.Lock()
 		delete(h.clients, c)
 		h.mu.Unlock()
-		close(c.send)
-		c.conn.Close()
+		close(c.send) // signals writePump to drain and close the conn
 	}()
 	for {
 		if _, _, err := c.conn.ReadMessage(); err != nil {

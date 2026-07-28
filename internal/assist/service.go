@@ -48,6 +48,14 @@ func New(client *llm.Client, hub *ws.Hub, st *store.Store) *Service {
 	}
 }
 
+// Cleanup removes the cooldown entry for a completed call.
+// Call this from OnCallCompleted to prevent the lastSug map growing without bound.
+func (s *Service) Cleanup(callID string) {
+	s.mu.Lock()
+	delete(s.lastSug, callID)
+	s.mu.Unlock()
+}
+
 // ProcessLine is called whenever a customer says something on an active call.
 // It generates an agent suggestion and broadcasts it via WebSocket.
 // Rate-limited: at most one suggestion per call per cooldown window.

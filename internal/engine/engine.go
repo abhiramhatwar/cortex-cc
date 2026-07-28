@@ -121,7 +121,9 @@ func (e *Engine) RouteCall(callID, agentID string) bool {
 	c.Status = models.CallStatusActive
 	a.Status = models.AgentStatusBusy
 	a.CurrentCallID = callID
-	e.emit("call_routed", c)
+	e.store.UpsertCall(c)
+	e.store.UpsertAgent(a)
+	e.emitCall("call_routed", c)
 	return true
 }
 
@@ -134,8 +136,11 @@ func (e *Engine) FlagCall(callID, reason string) bool {
 	}
 	c.Flagged = true
 	c.FlagReason = reason
-	e.store.UpsertCall(c)
-	e.emit("call_flagged", c)
+	if err := e.store.UpsertCall(c); err != nil {
+		log.Printf("engine: FlagCall UpsertCall: %v", err)
+		return false
+	}
+	e.emitCall("call_flagged", c)
 	return true
 }
 
@@ -183,6 +188,13 @@ func (e *Engine) emit(eventType string, payload any) {
 	}
 }
 
+// emitCall copies the call before emitting to avoid a data race between the
+// engine's write lock and json.Marshal in hub.Run (which runs without a lock).
+func (e *Engine) emitCall(eventType string, c *models.Call) {
+	cp := *c
+	e.emit(eventType, &cp)
+}
+
 func (e *Engine) newCallID() string {
 	return "C-" + uuid.NewString()[:6]
 }
@@ -215,7 +227,7 @@ func (e *Engine) tick() {
 			c.WaitSeconds = elapsed
 			if elapsed > slaThresholdSeconds && !c.SLABreached {
 				c.SLABreached = true
-				e.emit("sla_breached", c)
+				e.emitCall("sla_breached", c)
 			}
 			// 3% chance per tick to abandon
 			if elapsed > 30 && randN(100) < 3 {
@@ -224,7 +236,7 @@ func (e *Engine) tick() {
 				c.EndedAt = &t
 				delete(e.calls, c.ID)
 				e.store.UpsertCall(c)
-				e.emit("call_abandoned", c)
+				e.emitCall("call_abandoned", c)
 				continue
 			}
 			// assign to best-scored available agent
@@ -235,7 +247,7 @@ func (e *Engine) tick() {
 				r.agent.Status = models.AgentStatusBusy
 				r.agent.CurrentCallID = c.ID
 				e.store.UpsertAgent(r.agent)
-				e.emit("call_answered", c)
+				e.emitCall("call_answered", c)
 			}
 
 		case models.CallStatusActive:
@@ -243,7 +255,7 @@ func (e *Engine) tick() {
 			// drift sentiment slightly
 			c.Sentiment = clamp(c.Sentiment+randFloat(-0.05, 0.05), -1, 1)
 			if c.TalkSeconds > 0 && c.TalkSeconds%60 == 0 {
-				e.emit("sentiment_update", c)
+				e.emitCall("sentiment_update", c)
 			}
 			// complete after 60-300s of talk
 			if c.TalkSeconds > 60 && randN(100) < 4 {
@@ -255,7 +267,7 @@ func (e *Engine) tick() {
 		}
 
 		e.store.UpsertCall(c)
-		e.emit("call_updated", c)
+		e.emitCall("call_updated", c)
 	}
 }
 
@@ -272,7 +284,7 @@ func (e *Engine) completeCall(c *models.Call, now time.Time) {
 	}
 	delete(e.calls, c.ID)
 	e.store.UpsertCall(c)
-	e.emit("call_completed", c)
+	e.emitCall("call_completed", c)
 	if e.OnCallCompleted != nil {
 		cp := *c
 		go e.OnCallCompleted(&cp)

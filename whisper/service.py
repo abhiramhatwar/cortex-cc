@@ -97,7 +97,10 @@ async def transcribe(
         })
 
     finally:
-        os.unlink(tmp_path)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":
