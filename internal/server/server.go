@@ -7,28 +7,34 @@ import (
 	"net/http"
 
 	"github.com/abhiram/cortex-cc/internal/config"
+	"github.com/abhiram/cortex-cc/internal/engine"
 	"github.com/abhiram/cortex-cc/internal/store"
+	ws "github.com/abhiram/cortex-cc/internal/websocket"
 )
 
 type Server struct {
-	cfg   *config.Config
-	store *store.Store
-	mux   *http.ServeMux
+	cfg    *config.Config
+	store  *store.Store
+	engine *engine.Engine
+	hub    *ws.Hub
+	mux    *http.ServeMux
 }
 
-func New(cfg *config.Config, st *store.Store) *Server {
-	s := &Server{cfg: cfg, store: st, mux: http.NewServeMux()}
+func New(cfg *config.Config, st *store.Store, eng *engine.Engine, hub *ws.Hub) *Server {
+	s := &Server{cfg: cfg, store: st, engine: eng, hub: hub, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /ws", s.hub.ServeWS)
 	s.mux.HandleFunc("GET /api/calls", s.handleGetCalls)
 	s.mux.HandleFunc("GET /api/agents", s.handleGetAgents)
 	s.mux.HandleFunc("GET /api/queues", s.handleGetQueues)
 	s.mux.HandleFunc("GET /api/calls/{id}/transcript", s.handleGetTranscript)
 	s.mux.HandleFunc("GET /api/calls/{id}/summary", s.handleGetSummary)
+	s.mux.Handle("GET /", http.FileServer(http.Dir("./web")))
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -46,21 +52,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetCalls(w http.ResponseWriter, r *http.Request) {
-	calls, err := s.store.GetActiveCalls()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, calls)
+	writeJSON(w, http.StatusOK, s.engine.GetActiveCalls())
 }
 
 func (s *Server) handleGetAgents(w http.ResponseWriter, r *http.Request) {
-	agents, err := s.store.GetAllAgents()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, agents)
+	writeJSON(w, http.StatusOK, s.engine.GetAgents())
 }
 
 func (s *Server) handleGetQueues(w http.ResponseWriter, r *http.Request) {
