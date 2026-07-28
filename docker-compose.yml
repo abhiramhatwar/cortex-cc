@@ -9,11 +9,13 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - OLLAMA_MODEL=llama3.1:8b
       - WHISPER_URL=http://whisper:8001
+      - SENTIMENT_URL=http://sentiment:5001
     volumes:
       - cortex-data:/data
     depends_on:
       - ollama
       - whisper
+      - sentiment
 
   ollama:
     image: ollama/ollama:latest

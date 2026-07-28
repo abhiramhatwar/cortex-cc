@@ -123,5 +123,12 @@ func (e *Engine) generateTranscriptLines() {
 			continue
 		}
 		e.emit("transcript_line", t)
+
+		// Score the new transcript line against the real NLP model asynchronously.
+		// Only customer lines drive sentiment — agent script lines would bias scores.
+		if speaker == "customer" {
+			callID := c.ID
+			go e.UpdateSentiment(callID, line)
+		}
 	}
 }

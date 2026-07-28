@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/abhiram/cortex-cc/internal/models"
+	"github.com/abhiram/cortex-cc/internal/sentiment"
 	"github.com/abhiram/cortex-cc/internal/store"
 	"github.com/google/uuid"
 )
@@ -21,21 +22,47 @@ const (
 var queues = []string{"Sales", "Billing", "Support"}
 
 type Engine struct {
-	store  *store.Store
-	Events chan *models.Event
+	store     *store.Store
+	sentiment *sentiment.Client // optional — nil if service not running
+	Events    chan *models.Event
 
 	mu     sync.RWMutex
 	agents map[string]*models.Agent
 	calls  map[string]*models.Call
 }
 
-func New(st *store.Store) *Engine {
+func New(st *store.Store, sc *sentiment.Client) *Engine {
 	return &Engine{
-		store:  st,
-		Events: make(chan *models.Event, 256),
-		agents: make(map[string]*models.Agent),
-		calls:  make(map[string]*models.Call),
+		store:     st,
+		sentiment: sc,
+		Events:    make(chan *models.Event, 256),
+		agents:    make(map[string]*models.Agent),
+		calls:     make(map[string]*models.Call),
 	}
+}
+
+// UpdateSentiment scores a transcript line and updates the call's running sentiment.
+// Called asynchronously from the transcript generator. No-op if sentiment is offline.
+func (e *Engine) UpdateSentiment(callID, text string) {
+	if e.sentiment == nil {
+		return
+	}
+	score, err := e.sentiment.Score(text)
+	if err != nil {
+		log.Printf("sentiment: %v", err)
+		return
+	}
+	e.mu.Lock()
+	if c, ok := e.calls[callID]; ok {
+		// Exponential moving average — recent lines weigh more
+		c.Sentiment = 0.7*c.Sentiment + 0.3*score
+		e.emit(models.EventTypeAlert, map[string]any{
+			"source": "sentiment",
+			"call_id": callID,
+			"score":  c.Sentiment,
+		})
+	}
+	e.mu.Unlock()
 }
 
 func (e *Engine) Start(ctx context.Context) {

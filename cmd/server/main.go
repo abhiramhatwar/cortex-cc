@@ -12,6 +12,7 @@ import (
 	"github.com/abhiram/cortex-cc/internal/llm"
 	"github.com/abhiram/cortex-cc/internal/mcp"
 	"github.com/abhiram/cortex-cc/internal/monitor"
+	"github.com/abhiram/cortex-cc/internal/sentiment"
 	"github.com/abhiram/cortex-cc/internal/server"
 	"github.com/abhiram/cortex-cc/internal/store"
 	"github.com/abhiram/cortex-cc/internal/transcriber"
@@ -27,7 +28,14 @@ func main() {
 	}
 	defer st.Close()
 
-	eng := engine.New(st)
+	// on-prem HuggingFace sentiment service (optional — degrades gracefully)
+	sc := sentiment.New(cfg.SentimentURL)
+	if err := sc.Ping(); err != nil {
+		log.Printf("warning: sentiment service not reachable (%v) — using random drift", err)
+		sc = nil
+	}
+
+	eng := engine.New(st, sc)
 	hub := ws.NewHub()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
