@@ -139,6 +139,8 @@ cortex-cc is an **MCP server** built in Go. It wraps a contact center's live dat
 │  │  GET /api/calls/{id}/transcript  GET /api/calls/{id}/summary      │ │
 │  │  GET /api/calls/{id}/score  POST /api/calls/{id}/flag             │ │
 │  │  POST /api/calls/{id}/route  POST /api/transcribe                 │ │
+│  │  GET /api/routing/best-agent  GET /api/kb  POST /api/kb          │ │
+│  │  GET /api/kb/search  GET /api/kb/{id}  DELETE /api/kb/{id}       │ │
 │  │  GET /  (static → web/index.html)                                 │ │
 │  └────────────┬─────────────────────────────────────┬───────────────┘ │
 │               │                                     │                  │
@@ -165,7 +167,8 @@ cortex-cc is an **MCP server** built in Go. It wraps a contact center's live dat
 │  │  calls, agents,       │           │  40s cooldown, last-6 lines  │  │
 │  │  transcripts,         │           │  → Llama suggestion          │  │
 │  │  summaries,           │           └──────────────┬──────────────┘  │
-│  │  call_scores          │                          │                  │
+│  │  call_scores,         │                          │                  │
+│  │  kb_articles          │                          │                  │
 │  └───────────────────────┘           ┌──────────────▼──────────────┐  │
 │                                      │     QA Scorer (internal/qa)  │  │
 │                                      │  OnCallCompleted hook        │  │
@@ -818,6 +821,7 @@ The monitor runs independently of any user query. Every 60 seconds it calls the 
 | **SLA Tracking** | Breach detection at 120s wait threshold | Immediate WS event + visual flag |
 | **Sentiment Scoring** | Per-call NLP score updated on every customer line | DistilBERT EMA, [-1.0, 1.0] |
 | **Skills-Based Routing** | Auto-assigns calls to best-skilled agent using 3-tier score | Primary > secondary > fallback, tiebreak by load |
+| **RAG Knowledge Base** | BM25 keyword search over 10 seeded policy articles | Pure Go, no embedding model, SQLite-backed |
 | **Prometheus Metrics** | `/metrics` endpoint with 6 custom metric families | Pull-based, no background goroutine |
 | **Proactive Monitor** | Autonomous anomaly detection every 60s | No supervisor query needed |
 | **AI Advisories** | LLM-written action recommendations on anomaly | 2-3 sentence, concrete |
@@ -914,6 +918,21 @@ cortex-cc uses **SQLite** via `modernc.org/sqlite` (pure Go, no CGO required). T
 └─────────────────┴──────────────┴────────────────────────────────┘
 ```
 
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  TABLE: kb_articles                                             │
+├────────────────┬───────────────┬────────────────────────────────┤
+│  Column        │  Type         │  Notes                         │
+├────────────────┼───────────────┼────────────────────────────────┤
+│  id            │  TEXT PK      │  UUID                          │
+│  title         │  TEXT         │  article title (weighted 2× in │
+│                │               │  BM25 scoring)                 │
+│  content       │  TEXT         │  full article body             │
+│  tags          │  TEXT         │  JSON array: ["billing","refund"]│
+│  created_at    │  DATETIME     │  insertion time                │
+└────────────────┴───────────────┴────────────────────────────────┘
+```
+
 **Entity Relationship:**
 
 ```
@@ -927,6 +946,9 @@ cortex-cc uses **SQLite** via `modernc.org/sqlite` (pure Go, no CGO required). T
                                     (call_id PK/FK)
 
   agents ──── (current_call_id references calls.id, not a hard FK)
+
+  kb_articles ──── standalone (not FK-related to calls)
+                   Queried by BM25 retriever, seeded at startup
 ```
 
 **Write strategy:** All writes go through `store.UpsertCall()` and `store.UpsertAgent()`, which use `INSERT ... ON CONFLICT(id) DO UPDATE`. This is idempotent — calling upsert twice with the same state is safe and produces no duplicates.
@@ -1504,10 +1526,11 @@ Title is weighted 2× in BM25 scoring so concept-named articles (e.g. "Refund Pr
 ### Dependencies (go.mod)
 
 ```
-github.com/google/uuid         v1.6.0   — call and transcript IDs
-github.com/gorilla/websocket   v1.5.3   — WebSocket hub
-github.com/mark3labs/mcp-go    v0.57.0  — MCP stdio server
-modernc.org/sqlite             v1.54.0  — embedded database (pure Go)
+github.com/google/uuid                    v1.6.0   — call and transcript IDs
+github.com/gorilla/websocket              v1.5.3   — WebSocket hub
+github.com/mark3labs/mcp-go               v0.57.0  — MCP stdio server
+github.com/prometheus/client_golang       v1.24.1  — custom Collector, /metrics
+modernc.org/sqlite                        v1.54.0  — embedded database (pure Go)
 ```
 
 Zero heavyweight framework dependencies. Standard library does the rest.
@@ -1535,12 +1558,13 @@ cortex-cc/
 │   │
 │   ├── models/
 │   │   └── models.go            All domain types: Call, Agent, Transcript,
-│   │                            CallSummary, QueueStats, Event.
-│   │                            Shared by every package.
+│   │                            CallSummary, CallScore, KBArticle,
+│   │                            QueueStats, Event. Shared by every package.
 │   │
 │   ├── store/
-│   │   └── store.go             SQLite layer. 4 tables, idempotent upserts,
-│   │                            all queries in plain SQL. No ORM.
+│   │   └── store.go             SQLite layer. 6 tables (calls, agents,
+│   │                            transcripts, call_summaries, call_scores,
+│   │                            kb_articles). Idempotent upserts, plain SQL.
 │   │
 │   ├── engine/
 │   │   ├── engine.go            Core engine struct, Start(), tick loop,
@@ -1593,14 +1617,22 @@ cortex-cc/
 │   │   └── collector.go         Custom prometheus.Collector. Pulls from engine
 │   │                            + store on every scrape. 6 metric families.
 │   │
+│   ├── kb/
+│   │   ├── retriever.go         BM25-lite retriever. Stop-word filtered,
+│   │   │                        title weighted 2×. Search(query, topK).
+│   │   └── seed.go              SeedIfEmpty() — 10 pre-loaded policy articles.
+│   │                            Idempotent: no-op if table already has rows.
+│   │
 │   └── server/
-│       └── server.go            HTTP handlers for all 11 routes.
-│                                Multipart audio parsing for /api/transcribe.
+│       └── server.go            HTTP handlers for 16 routes (calls, agents,
+│                                queues, chat, score, routing, KB, transcribe,
+│                                metrics). Multipart audio for /api/transcribe.
 │
 ├── web/
 │   └── index.html               Single-file supervisor dashboard.
 │                                WebSocket client, agent poll, AI chat,
-│                                assist cards, alert banners.
+│                                KB search widget, assist cards, QA scores,
+│                                alert banners. No build step.
 │
 ├── whisper/
 │   ├── service.py               FastAPI Whisper STT service (port 8001).
@@ -1763,8 +1795,8 @@ All tests use **SQLite in-memory** (`:memory:`) — no files created, no cleanup
 
 ```
 go test -race -count=1 ./...
-ok      github.com/abhiram/cortex-cc/internal/engine    0.312s
-ok      github.com/abhiram/cortex-cc/internal/mcp       0.284s
+ok      cortex-cc/internal/engine    0.312s
+ok      cortex-cc/internal/mcp       0.284s
 ```
 
 ---
@@ -1870,18 +1902,22 @@ make help             # list all targets
 
 ## Commit History
 
-27 commits built over 20 days. Each day targeted a specific system:
+37 commits built over 15 days. Each phase targeted a specific system:
 
 | Days | What Was Built |
 |---|---|
 | 1–3 | Project scaffold, domain models, SQLite store, Docker setup |
 | 4–6 | Call engine goroutines, WebSocket hub, REST API |
-| 7–9 | MCP server (9 tools), Ollama client, agentic tool-calling loop |
+| 7–9 | MCP server (7 tools), Ollama client, agentic tool-calling loop |
 | 10–12 | `/api/chat` endpoint, supervisor dashboard, proactive monitor |
 | 13–15 | Whisper STT microservice, Go transcriber client, `/api/transcribe` |
 | 16–17 | HuggingFace DistilBERT sentiment service, Go client, engine wiring |
 | 18–19 | Agent assist service, `OnCustomerLine` hook, dashboard assist panel |
 | 20 | Engine unit tests, MCP tools tests, Makefile, DEMO.md, README |
+| 21–22 | Post-call QA scoring, `call_scores` table, WebSocket push, MCP stdio binary |
+| 23–24 | Prometheus `/metrics` endpoint, custom Collector, docker-compose Prometheus |
+| 25–26 | Skills-based routing, `find_best_agent` tool, dashboard Routing column |
+| 27 | RAG knowledge base, BM25 retriever, `search_knowledge_base` tool, KB widget |
 
 ---
 
