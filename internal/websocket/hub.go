@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/abhiramhatwar/cortex-cc/internal/models"
+	"cortex-cc/internal/models"
 	"github.com/gorilla/websocket"
 )
 

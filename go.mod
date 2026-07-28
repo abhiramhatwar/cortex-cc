@@ -1,4 +1,4 @@
-module github.com/abhiramhatwar/cortex-cc
+module cortex-cc
 
 go 1.25.5
 

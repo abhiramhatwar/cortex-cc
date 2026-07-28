@@ -7,10 +7,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/abhiramhatwar/cortex-cc/internal/llm"
-	"github.com/abhiramhatwar/cortex-cc/internal/mcp"
-	"github.com/abhiramhatwar/cortex-cc/internal/models"
-	ws "github.com/abhiramhatwar/cortex-cc/internal/websocket"
+	"cortex-cc/internal/llm"
+	"cortex-cc/internal/mcp"
+	"cortex-cc/internal/models"
+	ws "cortex-cc/internal/websocket"
 )
 
 const pollInterval = 60 * time.Second

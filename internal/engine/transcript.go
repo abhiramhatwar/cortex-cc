@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/abhiramhatwar/cortex-cc/internal/models"
+	"cortex-cc/internal/models"
 	"github.com/google/uuid"
 )
 

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abhiramhatwar/cortex-cc/internal/engine"
-	"github.com/abhiramhatwar/cortex-cc/internal/store"
+	"cortex-cc/internal/engine"
+	"cortex-cc/internal/store"
 )
 
 func newTestRegistry(t *testing.T) *ToolRegistry {

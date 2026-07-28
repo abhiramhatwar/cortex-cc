@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/abhiramhatwar/cortex-cc/internal/mcp"
+	"cortex-cc/internal/mcp"
 )
 
 const systemPrompt = `You are cortex-cc, an AI copilot for a contact center supervisor.

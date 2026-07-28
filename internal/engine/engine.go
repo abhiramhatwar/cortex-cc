@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/abhiramhatwar/cortex-cc/internal/models"
-	"github.com/abhiramhatwar/cortex-cc/internal/sentiment"
-	"github.com/abhiramhatwar/cortex-cc/internal/store"
+	"cortex-cc/internal/models"
+	"cortex-cc/internal/sentiment"
+	"cortex-cc/internal/store"
 	"github.com/google/uuid"
 )
 
