@@ -24,6 +24,11 @@
     .assist-card { background: #0f2744; border: 1px solid #1d4ed8; border-radius: 10px; }
     .assist-slide { animation: slideIn 0.3s ease-out; }
     @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    .score-excellent { color: #4ade80; }
+    .score-acceptable { color: #fb923c; }
+    .score-poor { color: #f87171; }
+    .qa-card { background: #0f2220; border: 1px solid #16a34a55; border-radius: 10px; }
+    .qa-slide { animation: slideIn 0.3s ease-out; }
   </style>
 </head>
 <body class="min-h-screen p-4">
@@ -96,6 +101,21 @@
   <!-- Alerts -->
   <div id="alerts-box" class="mt-4 space-y-2"></div>
 
+  <!-- QA Score Panel -->
+  <div class="mt-4 card p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <div class="w-5 h-5 rounded bg-green-700 flex items-center justify-center text-xs font-bold text-white">Q</div>
+        <h2 class="text-sm font-semibold text-white">Post-Call QA Scores</h2>
+        <span class="text-xs text-slate-500">— auto-scored by Ollama after each call completes</span>
+      </div>
+      <span id="qa-count" class="text-xs text-slate-500">0 scored</span>
+    </div>
+    <div id="qa-list" class="space-y-2 max-h-52 overflow-y-auto">
+      <p class="text-xs text-slate-600 italic">QA scores appear here when calls complete...</p>
+    </div>
+  </div>
+
   <!-- Agent Assist Panel -->
   <div class="mt-4 card p-4">
     <div class="flex items-center justify-between mb-3">
@@ -131,7 +151,7 @@
   </div>
 
 <script>
-  const state = { calls: {}, agents: {}, slaCount: 0, assistCount: 0 };
+  const state = { calls: {}, agents: {}, slaCount: 0, assistCount: 0, qaCount: 0 };
 
   // ── WebSocket ──────────────────────────────────────────────────────────────
   function connect() {
@@ -184,6 +204,9 @@
         break;
       case 'agent_assist':
         pushAssist(p);
+        break;
+      case 'call_scored':
+        pushQAScore(p);
         break;
     }
     render();
@@ -281,6 +304,42 @@
 
     // Auto-dismiss after 30s
     setTimeout(() => el.remove(), 30000);
+  }
+
+  // ── QA Scores ─────────────────────────────────────────────────────────────
+  function scoreClass(n) {
+    return n >= 8 ? 'score-excellent' : n >= 5 ? 'score-acceptable' : 'score-poor';
+  }
+  function scoreBadge(label, n) {
+    return `<span class="text-xs ${scoreClass(n)}">${label}: <strong>${n}</strong></span>`;
+  }
+  function pushQAScore(p) {
+    state.qaCount++;
+    document.getElementById('qa-count').textContent = `${state.qaCount} scored`;
+    const list = document.getElementById('qa-list');
+    const placeholder = list.querySelector('p.italic');
+    if (placeholder) placeholder.remove();
+
+    const el = document.createElement('div');
+    el.className = 'qa-card qa-slide p-3';
+    el.innerHTML = `
+      <div class="flex items-start justify-between gap-2">
+        <div class="flex-1">
+          <div class="flex items-center gap-3 mb-1">
+            <span class="text-xs font-mono text-violet-400">${p.call_id}</span>
+            <span class="text-xs ${scoreClass(p.overall)} font-bold">Overall: ${p.overall}/10</span>
+          </div>
+          <div class="flex gap-3 mb-1">
+            ${scoreBadge('Empathy', p.empathy)}
+            ${scoreBadge('Resolution', p.resolution)}
+            ${scoreBadge('Professionalism', p.professionalism)}
+          </div>
+          <p class="text-xs text-slate-400 italic">${p.notes}</p>
+        </div>
+        <button onclick="this.closest('.qa-card').remove()" class="text-slate-600 hover:text-slate-300 text-xs shrink-0">✕</button>
+      </div>`;
+    list.prepend(el);
+    while (list.children.length > 8) list.lastChild.remove();
   }
 
   // ── AI Chat ───────────────────────────────────────────────────────────────

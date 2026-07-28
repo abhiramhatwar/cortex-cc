@@ -83,3 +83,13 @@ type Event struct {
 	Type    string      `json:"type"`
 	Payload interface{} `json:"payload"`
 }
+
+type CallScore struct {
+	CallID          string    `json:"call_id"`
+	Empathy         int       `json:"empathy"`         // 1-10
+	Resolution      int       `json:"resolution"`      // 1-10
+	Professionalism int       `json:"professionalism"` // 1-10
+	Overall         int       `json:"overall"`         // 1-10
+	Notes           string    `json:"notes"`
+	ScoredAt        time.Time `json:"scored_at"`
+}

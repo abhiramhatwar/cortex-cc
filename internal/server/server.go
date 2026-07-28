@@ -47,6 +47,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/queues", s.handleGetQueues)
 	s.mux.HandleFunc("GET /api/calls/{id}/transcript", s.handleGetTranscript)
 	s.mux.HandleFunc("GET /api/calls/{id}/summary", s.handleGetSummary)
+	s.mux.HandleFunc("GET /api/calls/{id}/score", s.handleGetScore)
 	s.mux.HandleFunc("POST /api/calls/{id}/flag", s.handleFlagCall)
 	s.mux.HandleFunc("POST /api/calls/{id}/route", s.handleRouteCall)
 	s.mux.Handle("/", http.FileServer(http.Dir("./web")))
@@ -196,6 +197,20 @@ func (s *Server) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		"call_id":   callID,
 		"stored":    stored,
 	})
+}
+
+func (s *Server) handleGetScore(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	score, err := s.store.GetCallScore(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if score == nil {
+		writeError(w, http.StatusNotFound, "score not yet available — QA scoring happens asynchronously after call completion")
+		return
+	}
+	writeJSON(w, http.StatusOK, score)
 }
 
 func (s *Server) handleFlagCall(w http.ResponseWriter, r *http.Request) {

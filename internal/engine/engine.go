@@ -30,6 +30,10 @@ type Engine struct {
 	// Set this to wire in the agent assist service without a hard import dependency.
 	OnCustomerLine func(call *models.Call, text string)
 
+	// OnCallCompleted is called asynchronously when a call transitions to completed.
+	// Set this to wire in the QA scorer without a hard import dependency.
+	OnCallCompleted func(call *models.Call)
+
 	mu     sync.RWMutex
 	agents map[string]*models.Agent
 	calls  map[string]*models.Call
@@ -267,6 +271,10 @@ func (e *Engine) completeCall(c *models.Call, now time.Time) {
 	delete(e.calls, c.ID)
 	e.store.UpsertCall(c)
 	e.emit("call_completed", c)
+	if e.OnCallCompleted != nil {
+		cp := *c
+		go e.OnCallCompleted(&cp)
+	}
 }
 
 func (e *Engine) findAvailableAgentFor(queue string) *models.Agent {

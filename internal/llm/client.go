@@ -91,6 +91,19 @@ func (c *Client) Chat(messages []Message, tools any) (*chatResponseMessage, erro
 	return &cr.Message, nil
 }
 
+// OneShot sends a single system+user turn with no tools and returns the raw text reply.
+// Used by the QA scorer to generate structured scores without multi-turn history.
+func (c *Client) OneShot(system, prompt string) (string, error) {
+	msg, err := c.Chat([]Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: prompt},
+	}, nil)
+	if err != nil {
+		return "", err
+	}
+	return msg.Content, nil
+}
+
 // Ping checks if Ollama is reachable and the model is available.
 func (c *Client) Ping() error {
 	resp, err := c.http.Get(c.baseURL + "/api/tags")

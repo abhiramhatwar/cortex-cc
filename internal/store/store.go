@@ -71,6 +71,17 @@ func (s *Store) migrate() error {
 		created_at      DATETIME NOT NULL,
 		FOREIGN KEY (call_id) REFERENCES calls(id)
 	);
+
+	CREATE TABLE IF NOT EXISTS call_scores (
+		call_id          TEXT PRIMARY KEY,
+		empathy          INTEGER NOT NULL,
+		resolution       INTEGER NOT NULL,
+		professionalism  INTEGER NOT NULL,
+		overall          INTEGER NOT NULL,
+		notes            TEXT,
+		scored_at        DATETIME NOT NULL,
+		FOREIGN KEY (call_id) REFERENCES calls(id)
+	);
 	`)
 	return err
 }
@@ -219,6 +230,48 @@ func (s *Store) GetSummaryByCallID(callID string) (*models.CallSummary, error) {
 		return nil, nil
 	}
 	return cs, err
+}
+
+// ── Call Scores ────────────────────────────────────────────────────────────
+
+func (s *Store) InsertCallScore(cs *models.CallScore) error {
+	_, err := s.db.Exec(`
+		INSERT OR REPLACE INTO call_scores (call_id, empathy, resolution, professionalism, overall, notes, scored_at)
+		VALUES (?,?,?,?,?,?,?)`,
+		cs.CallID, cs.Empathy, cs.Resolution, cs.Professionalism, cs.Overall, cs.Notes, cs.ScoredAt,
+	)
+	return err
+}
+
+func (s *Store) GetCallScore(callID string) (*models.CallScore, error) {
+	row := s.db.QueryRow(`
+		SELECT call_id, empathy, resolution, professionalism, overall, notes, scored_at
+		FROM call_scores WHERE call_id=?`, callID)
+	cs := &models.CallScore{}
+	err := row.Scan(&cs.CallID, &cs.Empathy, &cs.Resolution, &cs.Professionalism, &cs.Overall, &cs.Notes, &cs.ScoredAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return cs, err
+}
+
+func (s *Store) GetRecentCallScores(limit int) ([]*models.CallScore, error) {
+	rows, err := s.db.Query(`
+		SELECT call_id, empathy, resolution, professionalism, overall, notes, scored_at
+		FROM call_scores ORDER BY scored_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var scores []*models.CallScore
+	for rows.Next() {
+		cs := &models.CallScore{}
+		if err := rows.Scan(&cs.CallID, &cs.Empathy, &cs.Resolution, &cs.Professionalism, &cs.Overall, &cs.Notes, &cs.ScoredAt); err != nil {
+			return nil, err
+		}
+		scores = append(scores, cs)
+	}
+	return scores, rows.Err()
 }
 
 // ── Queue Stats ────────────────────────────────────────────────────────────
