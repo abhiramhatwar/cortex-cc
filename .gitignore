@@ -1,0 +1,7 @@
+cortex-cc
+*.db
+*.db-shm
+*.db-wal
+.env
+tmp/
+bin/
