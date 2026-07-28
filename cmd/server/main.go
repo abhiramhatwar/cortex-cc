@@ -14,6 +14,7 @@ import (
 	"github.com/abhiram/cortex-cc/internal/monitor"
 	"github.com/abhiram/cortex-cc/internal/server"
 	"github.com/abhiram/cortex-cc/internal/store"
+	"github.com/abhiram/cortex-cc/internal/transcriber"
 	ws "github.com/abhiram/cortex-cc/internal/websocket"
 )
 
@@ -48,6 +49,13 @@ func main() {
 	mon := monitor.New(registry, loop, hub)
 	mon.Start(ctx)
 
-	srv := server.New(cfg, st, eng, hub, loop)
+	// on-prem Whisper transcription service (optional — degrades gracefully if not running)
+	tr := transcriber.New(cfg.WhisperURL)
+	if err := tr.Ping(); err != nil {
+		log.Printf("warning: whisper service not reachable (%v) — /api/transcribe will be unavailable", err)
+		tr = nil
+	}
+
+	srv := server.New(cfg, st, eng, hub, loop, tr)
 	log.Fatal(srv.Start())
 }

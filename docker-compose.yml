@@ -8,10 +8,12 @@ services:
       - DB_PATH=/data/cortex.db
       - OLLAMA_URL=http://ollama:11434
       - OLLAMA_MODEL=llama3.1:8b
+      - WHISPER_URL=http://whisper:8001
     volumes:
       - cortex-data:/data
     depends_on:
       - ollama
+      - whisper
 
   ollama:
     image: ollama/ollama:latest
@@ -19,6 +21,19 @@ services:
       - "11434:11434"
     volumes:
       - ollama-models:/root/.ollama
+
+  whisper:
+    build:
+      context: ./whisper
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - WHISPER_MODEL=base
+      - WHISPER_DEVICE=cpu
+      - PORT=8001
+    volumes:
+      - whisper-models:/root/.cache/whisper
 
   sentiment:
     build:
@@ -30,3 +45,4 @@ services:
 volumes:
   cortex-data:
   ollama-models:
+  whisper-models:

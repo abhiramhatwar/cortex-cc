@@ -6,24 +6,30 @@ import (
 	"log"
 	"net/http"
 
+	"io"
+	"time"
+
 	"github.com/abhiram/cortex-cc/internal/config"
 	"github.com/abhiram/cortex-cc/internal/engine"
 	"github.com/abhiram/cortex-cc/internal/llm"
+	"github.com/abhiram/cortex-cc/internal/models"
 	"github.com/abhiram/cortex-cc/internal/store"
+	"github.com/abhiram/cortex-cc/internal/transcriber"
 	ws "github.com/abhiram/cortex-cc/internal/websocket"
 )
 
 type Server struct {
-	cfg    *config.Config
-	store  *store.Store
-	engine *engine.Engine
-	hub    *ws.Hub
-	loop   *llm.Loop
-	mux    *http.ServeMux
+	cfg         *config.Config
+	store       *store.Store
+	engine      *engine.Engine
+	hub         *ws.Hub
+	loop        *llm.Loop
+	transcriber *transcriber.Client
+	mux         *http.ServeMux
 }
 
-func New(cfg *config.Config, st *store.Store, eng *engine.Engine, hub *ws.Hub, loop *llm.Loop) *Server {
-	s := &Server{cfg: cfg, store: st, engine: eng, hub: hub, loop: loop, mux: http.NewServeMux()}
+func New(cfg *config.Config, st *store.Store, eng *engine.Engine, hub *ws.Hub, loop *llm.Loop, tr *transcriber.Client) *Server {
+	s := &Server{cfg: cfg, store: st, engine: eng, hub: hub, loop: loop, transcriber: tr, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -33,6 +39,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /ws", s.hub.ServeWS)
 	s.mux.HandleFunc("POST /api/chat", s.handleChat)
 	s.mux.HandleFunc("POST /api/chat/reset", s.handleChatReset)
+	s.mux.HandleFunc("POST /api/transcribe", s.handleTranscribe)
 	s.mux.HandleFunc("GET /api/calls", s.handleGetCalls)
 	s.mux.HandleFunc("GET /api/agents", s.handleGetAgents)
 	s.mux.HandleFunc("GET /api/queues", s.handleGetQueues)
@@ -116,6 +123,74 @@ func (s *Server) handleGetSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, summary)
+}
+
+func (s *Server) handleTranscribe(w http.ResponseWriter, r *http.Request) {
+	if s.transcriber == nil {
+		writeError(w, http.StatusServiceUnavailable, "whisper service not configured")
+		return
+	}
+
+	// 32 MB max upload
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	file, header, err := r.FormFile("audio")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "audio field is required")
+		return
+	}
+	defer file.Close()
+
+	audio, err := io.ReadAll(file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read audio")
+		return
+	}
+
+	callID := r.FormValue("call_id")
+	speaker := r.FormValue("speaker")
+	if speaker == "" {
+		speaker = "AGENT"
+	}
+
+	result, err := s.transcriber.TranscribeBytes(audio, header.Filename)
+	if err != nil {
+		log.Printf("transcribe error: %v", err)
+		writeError(w, http.StatusBadGateway, "whisper service error: "+err.Error())
+		return
+	}
+
+	// If a call_id was provided, persist each segment as a transcript entry.
+	stored := 0
+	if callID != "" && len(result.Segments) > 0 {
+		base := time.Now().Add(-time.Duration(result.Duration) * time.Second)
+		for _, seg := range result.Segments {
+			t := &models.Transcript{
+				CallID:    callID,
+				Speaker:   speaker,
+				Text:      seg.Text,
+				Timestamp: base.Add(time.Duration(seg.Start*float64(time.Second))),
+			}
+			if err := s.store.InsertTranscript(t); err != nil {
+				log.Printf("store transcript segment: %v", err)
+			} else {
+				stored++
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"text":      result.Text,
+		"segments":  result.Segments,
+		"language":  result.Language,
+		"duration":  result.Duration,
+		"elapsed":   result.Elapsed,
+		"call_id":   callID,
+		"stored":    stored,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
