@@ -124,11 +124,16 @@ func (e *Engine) generateTranscriptLines() {
 		}
 		e.emit("transcript_line", t)
 
-		// Score the new transcript line against the real NLP model asynchronously.
-		// Only customer lines drive sentiment — agent script lines would bias scores.
+		// Customer lines trigger both sentiment scoring and agent assist suggestions.
+		// Both run in goroutines so they never block the transcript tick.
 		if speaker == "customer" {
 			callID := c.ID
 			go e.UpdateSentiment(callID, line)
+
+			if e.OnCustomerLine != nil {
+				callCopy := *c
+				go e.OnCustomerLine(&callCopy, line)
+			}
 		}
 	}
 }

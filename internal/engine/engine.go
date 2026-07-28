@@ -26,6 +26,10 @@ type Engine struct {
 	sentiment *sentiment.Client // optional — nil if service not running
 	Events    chan *models.Event
 
+	// OnCustomerLine is called asynchronously for every customer transcript line.
+	// Set this to wire in the agent assist service without a hard import dependency.
+	OnCustomerLine func(call *models.Call, text string)
+
 	mu     sync.RWMutex
 	agents map[string]*models.Agent
 	calls  map[string]*models.Call

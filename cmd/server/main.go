@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/abhiram/cortex-cc/internal/assist"
 	"github.com/abhiram/cortex-cc/internal/config"
 	"github.com/abhiram/cortex-cc/internal/engine"
 	"github.com/abhiram/cortex-cc/internal/llm"
@@ -52,6 +53,10 @@ func main() {
 	}
 	registry := mcp.NewToolRegistry(eng, st)
 	loop := llm.NewLoop(llmClient, registry)
+
+	// agent assist: generates real-time response suggestions for agents on customer lines
+	assistSvc := assist.New(llmClient, hub, st)
+	eng.OnCustomerLine = assistSvc.ProcessLine
 
 	// proactive anomaly monitor: polls every 60s, broadcasts alerts + AI advisories
 	mon := monitor.New(registry, loop, hub)
