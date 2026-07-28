@@ -44,6 +44,15 @@ services:
     ports:
       - "5001:5001"
 
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - cortex
+
 volumes:
   cortex-data:
   ollama-models:

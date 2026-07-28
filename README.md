@@ -625,7 +625,46 @@ CORTEX_URL=http://prod-server:8080 ./bin/cortex-mcp
 
 ---
 
-### 10. Proactive Monitor
+### 10. Prometheus Metrics
+
+cortex-cc exposes a standard `/metrics` endpoint scraped by Prometheus every 15s. A custom `Collector` pulls fresh data from the engine and store on every scrape — no background goroutine, no stale gauges.
+
+```
+GET /metrics   → Prometheus text format
+
+Metrics exposed:
+
+  cortex_calls_active{queue}          — active calls by queue (gauge)
+  cortex_calls_waiting{queue}         — calls in queue (gauge)
+  cortex_calls_sla_breached{queue}    — calls over 120s SLA (gauge)
+  cortex_agents_total{status}         — agents by status: available|busy|on_break|offline (gauge)
+  cortex_avg_handle_time_seconds      — fleet-wide average handle time (gauge)
+  cortex_qa_score_avg{dimension}      — avg QA score for last 50 calls, by dimension (gauge)
+                                        dimensions: empathy|resolution|professionalism|overall
+```
+
+**Example output:**
+
+```
+cortex_agents_total{status="available"} 9
+cortex_agents_total{status="busy"} 1
+cortex_avg_handle_time_seconds 183.4
+cortex_calls_active{queue="Billing"} 2
+cortex_calls_active{queue="Sales"} 1
+cortex_calls_active{queue="Support"} 3
+cortex_calls_sla_breached{queue="Billing"} 1
+cortex_calls_waiting{queue="Support"} 2
+cortex_qa_score_avg{dimension="empathy"} 7.8
+cortex_qa_score_avg{dimension="overall"} 8.1
+cortex_qa_score_avg{dimension="professionalism"} 8.4
+cortex_qa_score_avg{dimension="resolution"} 7.6
+```
+
+Docker Compose includes Prometheus on port `9090` with `prometheus.yml` pre-configured to scrape cortex on `cortex:8080/metrics` every 15s. Start with `make docker-up` and open `http://localhost:9090`.
+
+---
+
+### 11. Proactive Monitor
 
 The monitor runs independently of any user query. Every 60 seconds it calls the tool registry directly, computes anomalies, and fires alerts automatically.
 
@@ -685,6 +724,7 @@ The monitor runs independently of any user query. Every 60 seconds it calls the 
 | **Agent Monitoring** | Status, calls handled, avg handle time per agent | Polled every 5s via REST |
 | **SLA Tracking** | Breach detection at 120s wait threshold | Immediate WS event + visual flag |
 | **Sentiment Scoring** | Per-call NLP score updated on every customer line | DistilBERT EMA, [-1.0, 1.0] |
+| **Prometheus Metrics** | `/metrics` endpoint with 6 custom metric families | Pull-based, no background goroutine |
 | **Proactive Monitor** | Autonomous anomaly detection every 60s | No supervisor query needed |
 | **AI Advisories** | LLM-written action recommendations on anomaly | 2-3 sentence, concrete |
 | **Agent Assist** | Real-time response suggestions during live calls | 40s cooldown per call |
@@ -813,6 +853,18 @@ Response 200:
   "status": "ok",
   "service": "cortex-cc"
 }
+```
+
+### Prometheus Metrics
+
+```
+GET /metrics
+
+Returns Prometheus text-format metrics. Scraped by Prometheus every 15s.
+Also readable with curl for quick checks.
+
+Example:
+  curl http://localhost:8080/metrics | grep cortex_
 ```
 
 ### Calls
@@ -1349,6 +1401,10 @@ cortex-cc/
 │   │                            OneShot LLM call, JSON brace extraction,
 │   │                            clamp 1-10, store + WebSocket broadcast.
 │   │
+│   ├── metrics/
+│   │   └── collector.go         Custom prometheus.Collector. Pulls from engine
+│   │                            + store on every scrape. 6 metric families.
+│   │
 │   └── server/
 │       └── server.go            HTTP handlers for all 11 routes.
 │                                Multipart audio parsing for /api/transcribe.
@@ -1432,11 +1488,12 @@ open http://localhost:8080
 ┌────────────┬─────────────────────────────────────┬───────┬──────────────────┐
 │  Container │  Role                               │  Port │  Image           │
 ├────────────┼─────────────────────────────────────┼───────┼──────────────────┤
-│  ollama    │  Local LLM runtime (Llama 3.1:8b)   │ 11434 │  ollama/ollama   │
-│  sentiment │  DistilBERT sentiment service       │  5001 │  built from ./sentiment│
-│  whisper   │  Whisper STT service                │  8001 │  built from ./whisper  │
-│  cortex    │  Go API + dashboard                 │  8080 │  built from ./Dockerfile│
-└────────────┴─────────────────────────────────────┴───────┴──────────────────┘
+│  ollama      │  Local LLM runtime (Llama 3.1:8b)   │ 11434 │  ollama/ollama        │
+│  sentiment   │  DistilBERT sentiment service       │  5001 │  built from ./sentiment│
+│  whisper     │  Whisper STT service                │  8001 │  built from ./whisper  │
+│  cortex      │  Go API + dashboard                 │  8080 │  built from ./Dockerfile│
+│  prometheus  │  Metrics scraper (15s interval)     │  9090 │  prom/prometheus      │
+└──────────────┴─────────────────────────────────────┴───────┴───────────────────────┘
 ```
 
 **Useful Docker commands:**

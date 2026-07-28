@@ -10,10 +10,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"cortex-cc/internal/config"
 	"cortex-cc/internal/engine"
 	"cortex-cc/internal/llm"
+	"cortex-cc/internal/metrics"
 	"cortex-cc/internal/models"
 	"cortex-cc/internal/store"
 	"cortex-cc/internal/transcriber"
@@ -32,6 +35,11 @@ type Server struct {
 
 func New(cfg *config.Config, st *store.Store, eng *engine.Engine, hub *ws.Hub, loop *llm.Loop, tr *transcriber.Client) *Server {
 	s := &Server{cfg: cfg, store: st, engine: eng, hub: hub, loop: loop, transcriber: tr, mux: http.NewServeMux()}
+
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(metrics.NewCollector(eng, st))
+	s.mux.Handle("GET /metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+
 	s.routes()
 	return s
 }
