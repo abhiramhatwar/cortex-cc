@@ -9,7 +9,7 @@
 [![HuggingFace](https://img.shields.io/badge/NLP-DistilBERT-FFD21E)](https://huggingface.co)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docker.com)
 [![License](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE)
-[![Commits](https://img.shields.io/badge/commits-27-6366F1)](https://github.com/abhiramhatwar/cortex-cc)
+[![Commits](https://img.shields.io/badge/commits-30-6366F1)](https://github.com/abhiramhatwar/cortex-cc)
 
 ---
 
@@ -69,11 +69,12 @@ Every single one of them receives a "no" when they ask Mitel for on-prem AI. Tha
 | AI engine | Talkative AI (cloud) | Proprietary cloud | Ollama + Llama 3.1 (local) |
 | Data leaves server | Yes | Yes | **Never** |
 | HIPAA / PCI compliant | No | No | **Yes** |
-| MCP support | None | None | **Full — 7 tools** |
+| MCP support | None | None | **Full — 7 tools, stdio binary** |
 | Swap the LLM | No | No | **Yes — any Ollama model** |
 | Real-time sentiment | No | Yes (cloud) | **Yes (on-prem DistilBERT)** |
 | Agent assist suggestions | No | Yes (cloud) | **Yes (on-prem Llama 3.1)** |
 | Proactive anomaly alerts | Basic | Yes | **Yes + AI advisory** |
+| Post-call QA scoring | Manual | Cloud AI | **Yes (on-prem Llama 3.1)** |
 | Speech-to-text | Vendor only | Vendor only | **Yes (on-prem Whisper)** |
 | Monthly cost per agent | $65–$85 | $35–$75 | **$0** |
 | Open source | No | No | **Yes (MIT)** |
@@ -136,7 +137,9 @@ cortex-cc is an **MCP server** built in Go. It wraps a contact center's live dat
 │  │  GET /health  GET /ws  POST /api/chat  POST /api/chat/reset       │ │
 │  │  GET /api/calls  GET /api/agents  GET /api/queues                 │ │
 │  │  GET /api/calls/{id}/transcript  GET /api/calls/{id}/summary      │ │
-│  │  POST /api/transcribe   GET /  (static → web/index.html)         │ │
+│  │  GET /api/calls/{id}/score  POST /api/calls/{id}/flag             │ │
+│  │  POST /api/calls/{id}/route  POST /api/transcribe                 │ │
+│  │  GET /  (static → web/index.html)                                 │ │
 │  └────────────┬─────────────────────────────────────┬───────────────┘ │
 │               │                                     │                  │
 │  ┌────────────▼──────────┐           ┌──────────────▼──────────────┐  │
@@ -161,8 +164,15 @@ cortex-cc is an **MCP server** built in Go. It wraps a contact center's live dat
 │  │    SQLite (no CGO)    │           │     Agent Assist Service     │  │
 │  │  calls, agents,       │           │  40s cooldown, last-6 lines  │  │
 │  │  transcripts,         │           │  → Llama suggestion          │  │
-│  │  summaries            │           └─────────────────────────────┘  │
-│  └───────────────────────┘                                             │
+│  │  summaries,           │           └──────────────┬──────────────┘  │
+│  │  call_scores          │                          │                  │
+│  └───────────────────────┘           ┌──────────────▼──────────────┐  │
+│                                      │     QA Scorer (internal/qa)  │  │
+│                                      │  OnCallCompleted hook        │  │
+│                                      │  transcript → Llama → score  │  │
+│                                      │  1-10: empathy, resolution,  │  │
+│                                      │  professionalism, overall    │  │
+│                                      └─────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────┘
          │                          │
          ▼                          ▼
@@ -177,6 +187,21 @@ cortex-cc is an **MCP server** built in Go. It wraps a contact center's live dat
                          │  OpenAI Whisper base  │
                          │  (local Docker)       │
                          └──────────────────────┘
+
+Standalone MCP stdio binary (out-of-process):
+
+┌─────────────────────────────────────────────────────────────┐
+│  bin/cortex-mcp  (cmd/mcp-server)                           │
+│                                                             │
+│  MCP Client (Cursor / VS Code Copilot)                      │
+│       │  stdio                                              │
+│       ▼                                                     │
+│  MCPServer (mark3labs/mcp-go)                               │
+│       │  Execute(tool, args)                                │
+│       ▼                                                     │
+│  HTTPExecutor  ──────► GET/POST http://localhost:8080/api/  │
+│                         (calls the running cortex-cc server) │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -474,7 +499,133 @@ Every time a customer speaks on a live call, the assist service generates a sugg
 
 ---
 
-### 8. Proactive Monitor
+### 8. Post-Call QA Scoring
+
+Every time a call completes, cortex-cc automatically scores the agent's performance using a local Llama 3.1 inference — no human reviewer needed, no cloud.
+
+```
+  call transitions to "completed"
+       │
+       ▼
+  engine.completeCall() fires
+       │
+       ├── emits "call_completed" WebSocket event
+       │
+       └── eng.OnCallCompleted(copy of call)   ← hook (no import cycle)
+                │  goroutine — doesn't block the engine tick
+                ▼
+         qa.Scorer.scoreAsync(call)
+                │
+                ▼
+         store.GetTranscriptByCallID(call.ID)
+                │  if no transcript → skip quietly
+                ▼
+         Build prompt:
+           Call ID: C-a1b2c3 | Queue: Billing | Talk: 147s | Sentiment: -0.41
+
+           Transcript:
+           [AGENT]: Thank you for calling Billing, how can I help?
+           [CUSTOMER]: I was charged twice and I'm furious.
+           [AGENT]: I sincerely apologize — I can see the duplicate charge...
+                │
+                ▼
+         llm.Client.OneShot(system_prompt, transcript_prompt)
+           System: "Score empathy, resolution, professionalism, overall (1-10).
+                    Return ONLY valid JSON, no markdown."
+                │
+                ▼
+         Llama 3.1:8b responds:
+           {
+             "empathy": 9,
+             "resolution": 8,
+             "professionalism": 9,
+             "overall": 9,
+             "notes": "Agent handled an angry customer with genuine empathy
+                       and resolved the billing issue efficiently."
+           }
+                │
+                ▼
+         parseScore() — extracts JSON, clamps each field 1-10
+                │
+                ▼
+         store.InsertCallScore(score)  → call_scores table
+                │
+                ▼
+         hub.Broadcast({ type: "call_scored", payload: score })
+                │
+                ▼
+         Dashboard: QA card slides in with color-coded scores
+         API:       GET /api/calls/{id}/score returns the score
+```
+
+**Score color coding:**
+
+```
+  1 ────────── 4 ────────── 7 ────────── 10
+  │            │            │            │
+  Red          │   Amber    │   Green    │
+  Poor         Acceptable   Excellent
+```
+
+**Why a goroutine + hook pattern?** The QA scorer is slow (LLM inference takes 5-30 seconds). Calling it synchronously inside the engine tick would freeze all call processing. The `OnCallCompleted` hook fires the scorer in a background goroutine with a copy of the completed call. The engine continues its tick loop with zero latency.
+
+**Graceful degradation:** If Ollama is offline, `llm.OneShot()` returns an error — the scorer logs it and skips silently. No crash, no panic. Calls still complete normally.
+
+---
+
+### 9. Standalone MCP Stdio Server
+
+`bin/cortex-mcp` is a separate binary that exposes all 7 contact center tools over the Model Context Protocol stdio transport. Unlike the in-process MCP server (which shares the engine's memory), this binary runs as an independent process and communicates with a running cortex-cc instance via HTTP.
+
+```
+  MCP Client (Cursor IDE, VS Code Copilot, etc.)
+       │
+       │  spawns  bin/cortex-mcp  (stdio)
+       ▼
+  cortex-mcp process
+       │
+       │  tool_call{ "get_queue_status" }
+       ▼
+  HTTPExecutor.Execute("get_queue_status")
+       │
+       ▼
+  GET http://localhost:8080/api/calls
+       │
+       ▼
+  running cortex-cc server
+  (contacts its in-memory engine)
+       │
+       ▼
+  JSON queue stats returned to MCP client
+```
+
+**Why a standalone binary?** MCP clients spawn the server as a child process and communicate over stdin/stdout. A standalone binary lets any MCP client (Cursor, VS Code, Claude Desktop, any MCP-compatible tool) query live contact center data without modifying the cortex-cc server.
+
+**Configuration:**
+
+```bash
+# Build the binary
+make build-mcp
+
+# Run (connect to non-default server)
+CORTEX_URL=http://prod-server:8080 ./bin/cortex-mcp
+
+# Cursor integration (~/.cursor/mcp.json):
+{
+  "mcpServers": {
+    "cortex-cc": {
+      "command": "/path/to/bin/cortex-mcp",
+      "env": { "CORTEX_URL": "http://localhost:8080" }
+    }
+  }
+}
+```
+
+**Write operations supported:** `flag_call` and `route_call` are exposed as MCP write tools — an MCP client can say "Flag C-abc123 as escalation" and cortex-mcp will POST to the cortex-cc API to execute it.
+
+---
+
+### 10. Proactive Monitor
 
 The monitor runs independently of any user query. Every 60 seconds it calls the tool registry directly, computes anomalies, and fires alerts automatically.
 
@@ -525,9 +676,11 @@ The monitor runs independently of any user query. Every 60 seconds it calls the 
 
 | Feature | What It Does | Key Detail |
 |---|---|---|
-| **MCP Server** | Exposes 7 tools over stdio transport | Compatible with any MCP client |
+| **MCP Stdio Server** | Standalone binary exposing 7 tools over stdio | Any MCP client: Cursor, VS Code, etc. |
+| **MCP Tool Registry** | In-process tool calling by Ollama loop | Shared `Execute()` — no duplication |
 | **AI Copilot Chat** | Natural language Q&A over live data | Agentic, up to 5 tool rounds |
 | **Multi-Turn History** | Conversation context persists across questions | Reset via `POST /api/chat/reset` |
+| **Post-Call QA Scoring** | Scores every completed call 1-10 on 4 dimensions | Async, on-prem Llama 3.1, WebSocket push |
 | **Live Call Queue** | Real-time table of all active/queued calls | WebSocket push, no polling |
 | **Agent Monitoring** | Status, calls handled, avg handle time per agent | Polled every 5s via REST |
 | **SLA Tracking** | Breach detection at 120s wait threshold | Immediate WS event + visual flag |
@@ -536,8 +689,8 @@ The monitor runs independently of any user query. Every 60 seconds it calls the 
 | **AI Advisories** | LLM-written action recommendations on anomaly | 2-3 sentence, concrete |
 | **Agent Assist** | Real-time response suggestions during live calls | 40s cooldown per call |
 | **Whisper STT** | Upload audio → timestamped transcript segments | Stored in SQLite by call |
-| **Call Flagging** | Mark calls for QA with a reason | Via chat or direct API |
-| **Call Routing** | Transfer a call to a specific agent via chat | Via chat or direct API |
+| **Call Flagging** | Mark calls for QA with a reason | Via chat, MCP, or direct API |
+| **Call Routing** | Transfer a call to a specific agent | Via chat, MCP, or direct API |
 | **Post-Call Summary** | Structured JSON: issue, resolution, follow-up | LLM-generated |
 | **Supervisor Dashboard** | Full dark-themed HTML UI, no build step | Tailwind CSS, WebSocket |
 | **Docker Compose** | One-command deploy of all 4 services | Ollama, Whisper, Sentiment, cortex |
@@ -611,6 +764,20 @@ cortex-cc uses **SQLite** via `modernc.org/sqlite` (pure Go, no CGO required). T
 │  sentiment_label│ TEXT         │  positive|neutral|negative     │
 │  created_at    │  DATETIME     │  summary generation time       │
 └────────────────┴───────────────┴────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  TABLE: call_scores                                             │
+├─────────────────┬──────────────┬────────────────────────────────┤
+│  Column         │  Type        │  Notes                         │
+├─────────────────┼──────────────┼────────────────────────────────┤
+│  call_id        │  TEXT PK     │  FK → calls.id                 │
+│  empathy        │  INTEGER     │  1-10, agent empathy           │
+│  resolution     │  INTEGER     │  1-10, issue resolution        │
+│  professionalism│  INTEGER     │  1-10, tone and conduct        │
+│  overall        │  INTEGER     │  1-10, composite score         │
+│  notes          │  TEXT        │  one-sentence LLM summary      │
+│  scored_at      │  DATETIME    │  async scoring completion time │
+└─────────────────┴──────────────┴────────────────────────────────┘
 ```
 
 **Entity Relationship:**
@@ -619,7 +786,10 @@ cortex-cc uses **SQLite** via `modernc.org/sqlite` (pure Go, no CGO required). T
   calls 1──────────────────── * transcripts
     │                               (call_id FK)
     │
-    └──────────────────────── 0..1 call_summaries
+    ├──────────────────────── 0..1 call_summaries
+    │                               (call_id PK/FK)
+    │
+    └──────────────────────── 0..1 call_scores
                                     (call_id PK/FK)
 
   agents ──── (current_call_id references calls.id, not a hard FK)
@@ -702,6 +872,26 @@ Response 200:
 }
 
 Response 404: { "error": "summary not yet available" }
+```
+
+```
+GET /api/calls/{id}/score
+
+Returns the QA score for a completed call. Scores are generated asynchronously
+by Llama 3.1 within seconds of call completion and stored in SQLite.
+
+Response 200:
+{
+  "call_id": "C-a1b2c3",
+  "empathy": 9,
+  "resolution": 8,
+  "professionalism": 9,
+  "overall": 9,
+  "notes": "Agent handled billing dispute with empathy and resolved efficiently.",
+  "scored_at": "2026-07-28T15:03:42Z"
+}
+
+Response 404: { "error": "score not yet available — QA scoring happens asynchronously after call completion" }
 ```
 
 ### Agents
@@ -828,6 +1018,7 @@ Connect to `ws://localhost:8080/ws`. All messages are JSON.
 | `alert` (monitor) | Every 60s if anomaly | `source, level, title, detail, ts` |
 | `alert` (ai_advisory) | After anomaly if Ollama up | `source: "ai_advisory", detail: "..."` |
 | `agent_assist` | Customer speaks on active call | `call_id, agent_id, queue, trigger, suggestion` |
+| `call_scored` | QA score ready after call ends | `call_id, empathy, resolution, professionalism, overall, notes, scored_at` |
 
 ### Example: Receiving Agent Assist
 
@@ -1089,10 +1280,14 @@ Zero heavyweight framework dependencies. Standard library does the rest.
 cortex-cc/
 │
 ├── cmd/
-│   └── server/
-│       └── main.go              Entry point. Wires all components in order:
-│                                store → engine → hub → llm → mcp → assist
-│                                → monitor → transcriber → server
+│   ├── server/
+│   │   └── main.go              Entry point. Wires all components in order:
+│   │                            store → engine → hub → llm → mcp → assist
+│   │                            → qa → monitor → transcriber → server
+│   └── mcp-server/
+│       └── main.go              Standalone MCP stdio binary. HTTPExecutor
+│                                calls cortex-cc REST API. Works with Cursor,
+│                                VS Code Copilot, Claude Desktop, etc.
 │
 ├── internal/
 │   ├── config/
@@ -1149,8 +1344,13 @@ cortex-cc/
 │   │   └── service.go           Agent assist. Rate-limited (40s/call).
 │   │                            Fetches last 6 lines, calls Ollama, broadcasts.
 │   │
+│   ├── qa/
+│   │   └── scorer.go            Post-call QA scorer. Async goroutine per call.
+│   │                            OneShot LLM call, JSON brace extraction,
+│   │                            clamp 1-10, store + WebSocket broadcast.
+│   │
 │   └── server/
-│       └── server.go            HTTP handlers for all 10 routes.
+│       └── server.go            HTTP handlers for all 11 routes.
 │                                Multipart audio parsing for /api/transcribe.
 │
 ├── web/
@@ -1329,6 +1529,8 @@ ok      github.com/abhiram/cortex-cc/internal/mcp       0.284s
 ```bash
 make run              # go run ./cmd/server
 make build            # compile to bin/cortex-cc (stripped binary)
+make build-mcp        # compile standalone MCP binary to bin/mcp-server
+make build-all        # build both cortex-cc and mcp-server
 make test             # go test -race -count=1 ./...
 make test-short       # go test -short -count=1 ./...
 make lint             # go vet ./... + staticcheck (if installed)
